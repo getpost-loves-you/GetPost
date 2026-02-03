@@ -22,6 +22,10 @@ const favicon_gzip =
 
 const notpacman_svg = `AUTOINSERT_NOTPACMAN__SVG`; // eslint-disable-line
 const getpost_css = `AUTOINSERT_GETPOST__CSS`; // eslint-disable-line
+const naclfast_base64 = `AUTOINSERT_NACLFAST__MIN__JS__BASE64`; // eslint-disable-line
+const argon2bundled_base64 = `AUTOINSERT_ARGON2BUNDLED__MIN__JS__BASE64`; // eslint-disable-line
+const qrcode_base64 = `AUTOINSERT_QRCODE__MIN__JS__BASE64`; // eslint-disable-line
+const wordlist_txt = `AUTOINSERT_WORDLIST__TXT`; // eslint-disable-line
 
 const ENCODING_LEN = ENCODING.length;
 const TIME_LEN = 10;
@@ -300,6 +304,18 @@ expires at: ${responseData.expires_at}`;
     } else if (url.pathname === "/getpost.css") {
       // return static css content
       return buildResponse(getpost_css, "text/css", {}, 200, url);
+    } else if (url.pathname === "/naclfast.min.js") {
+      // return NaCl crypto library (base64 decoded)
+      return buildResponse(str2ab(atob(naclfast_base64)), "application/javascript", {}, 200, url);
+    } else if (url.pathname === "/argon2bundled.min.js") {
+      // return Argon2 key derivation library (base64 decoded)
+      return buildResponse(str2ab(atob(argon2bundled_base64)), "application/javascript", {}, 200, url);
+    } else if (url.pathname === "/qrcode.min.js") {
+      // return QR code generation library (base64 decoded)
+      return buildResponse(str2ab(atob(qrcode_base64)), "application/javascript", {}, 200, url);
+    } else if (url.pathname === "/wordlist.txt") {
+      // return wordlist for password generation
+      return buildResponse(wordlist_txt, "text/plain; charset=UTF-8", {}, 200, url);
     } else if (url.pathname === "/favicon.ico") {
       // returning binary requires UTF-16 JS strings to be converted to ie) UTF-8 bytes
       return buildResponse(
@@ -467,11 +483,28 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     return ["CONTENT NOT FOUND", DEFAULT_MIME_TEXT];
   }
   const contentAsUint8Array = new Uint8Array(content);
+
+  // Check if content is encrypted (first byte is 0x00)
+  const isEncrypted = contentAsUint8Array.length > 0 && contentAsUint8Array[0] === 0;
+
   const contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
   // checks to see if characters are all plausibly utf-8 / printable
-  const contentIsPrintable = /^[\x00-\x7F]*$/m.test(contentAsString);
+  let contentIsPrintable = true;
+  for (let i = 0; i < Math.min(contentAsString.length, 1000); i++) {
+    const code = contentAsString.charCodeAt(i);
+    if (code > 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
+      contentIsPrintable = false;
+      break;
+    }
+  }
   const header = hex(contentAsUint8Array.slice(0, 4));
   let injectorScript, type;
+
+  // Handle encrypted content specially - don't auto-redirect
+  if (isEncrypted) {
+    type = "application/x-encrypted";
+    injectorScript = "";
+  } else {
   // matches the first four bytes of the uploaded file
   switch (header) {
     // echo -n 'ftypmp42' | xxd
@@ -512,10 +545,16 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
       }
       break;
   }
+  } // end encrypted check
+
   switch (type) {
     case "image/png":
     case "image/gif":
     case "image/jpeg":
+      break;
+    case "application/x-encrypted":
+      // Encrypted content - let the HTML wrapper handle decryption
+      injectorScript = "";
       break;
     case "audio/mp3":
     case "video/mp4":
