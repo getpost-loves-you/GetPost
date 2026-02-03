@@ -248,7 +248,7 @@ def main():
         filename = 'stdin.txt'
     elif len(sys.argv) > 1:
         # Reading from command line argument
-        content = sys.argv[-1].encode('utf-8')
+        content = open(sys.argv[-1], "rb").read()
         filename = 'argument.txt'
     else:
         print(__doc__)

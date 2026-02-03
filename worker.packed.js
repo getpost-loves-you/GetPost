@@ -1127,12 +1127,12 @@ let WORDLIST = [
     'penumbra', 'twilight', 'aurora', 'vesper', 'chrysalis', 'petrichor', 'solstice', 'liminal', 'threshold', 'ephemeral',
     'luminous', 'nebula', 'cascade', 'resonance', 'prismatic', 'quintessence', 'ephemera', 'meridian', 'cipher', 'enigma'
 ];
-
+const pattern = String.fromCharCode(92) + 'r' + '?' + String.fromCharCode(92) + 'n';
 // Load full wordlist from server (will replace fallback when loaded)
 fetch('/wordlist.txt')
     .then(response => response.text())
     .then(text => {
-        const words = text.trim().split('\n').filter(word => word.length > 0);
+        const words = text.trim().split(new RegExp(pattern)).filter(word => word.length > 0);
         if (words.length > 0) {
             WORDLIST = words;
             console.log('Loaded ' + words.length + ' words for password generation');
