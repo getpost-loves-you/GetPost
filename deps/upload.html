@@ -1,13 +1,161 @@
 <html><head>
 <link rel="stylesheet" href="/getpost.css">
-<title>GetPost: Upload</title>
+<title>GetPost: Secure Upload</title>
 <meta name="title" content="GetPost: Libre linking for poems and memes">
-<meta name="description" content="Run your own instance for free on any domain. No accounts, no tracking, globally distributed.">
+<meta name="description" content="Run your own instance for free on any domain. No accounts, no tracking, globally distributed. Now with E2E encryption!">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta property="twitter:card" content="summary_large_image">
 <meta property="twitter:url" content="${url.toString()}">
 <meta property="twitter:title" content="GetPost: Libre linking for poems and memes">
 <meta property="twitter:description" content="Run your own instance for free on any domain. No accounts, no tracking, globally distributed.">
+<style>
+.encryption-section {
+    background: #2a2828;
+    border: 2px solid #48bb78;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+.encryption-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+    font-size: 16px;
+    font-weight: bold;
+    color: #f5f3f3;
+}
+.encryption-toggle input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+}
+.password-fields {
+    display: none;
+    margin-top: 15px;
+}
+.password-fields.active {
+    display: block;
+}
+.password-field {
+    margin-bottom: 10px;
+    position: relative;
+}
+.password-field label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #f5f3f3;
+}
+.password-field input {
+    width: 100%;
+    padding: 10px 40px 10px 10px;
+    border: 2px solid #555;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    background: #1a1818;
+    color: #f5f3f3;
+}
+.password-field input:focus {
+    outline: none;
+    border-color: #48bb78;
+}
+.password-toggle {
+    position: absolute;
+    right: 10px;
+    top: 35px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 5px;
+    color: #999;
+    user-select: none;
+}
+.password-toggle:hover {
+    color: #f5f3f3;
+}
+.password-generate {
+    margin-top: 10px;
+    padding: 8px 16px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+}
+.password-generate:hover {
+    background: #5568d3;
+}
+.encryption-info {
+    background: #3a3838;
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+    font-size: 13px;
+    color: #fbbf24;
+}
+.qr-container {
+    display: none;
+    margin-top: 20px;
+    padding: 20px;
+    background: #2a2828;
+    border: 2px solid #48bb78;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.qr-container.active {
+    display: block;
+}
+#qrcode {
+    display: flex;
+    justify-content: center;
+    margin: 20px 0;
+    padding: 15px;
+    background: white;
+    border-radius: 8px;
+}
+.share-links {
+    margin-top: 15px;
+}
+.share-link {
+    display: block;
+    padding: 8px;
+    background: #1a1818;
+    border: 1px solid #555;
+    border-radius: 4px;
+    margin: 5px 0;
+    font-size: 12px;
+    word-break: break-all;
+    color: #f5f3f3;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.share-link:hover {
+    background: #2a2828;
+    border-color: #48bb78;
+}
+.share-link.copied {
+    background: #1f3a2f;
+    border-color: #48bb78;
+}
+.copy-feedback {
+    display: inline-block;
+    margin-left: 10px;
+    color: #48bb78;
+    font-weight: 600;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.copy-feedback.show {
+    opacity: 1;
+}
+</style>
 </head>
 <body>
 
@@ -16,6 +164,30 @@
 <h3>🚀 Run your own instance for free on any domain</h3>
 
 <p>Share text, images, and files up to 10MB. No accounts, no tracking, globally distributed.</p>
+
+<div class="encryption-section">
+    <div class="encryption-toggle">
+        <input type="checkbox" id="encryptToggle">
+        <label for="encryptToggle">🔒 Enable End-to-End Encryption</label>
+    </div>
+    <div class="password-fields" id="passwordFields">
+        <div class="password-field">
+            <label for="encryptPassword">Encryption Password:</label>
+            <input type="password" id="encryptPassword" placeholder="Enter a strong password">
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('encryptPassword', this)">👁️</button>
+        </div>
+        <div class="password-field">
+            <label for="confirmPassword">Confirm Password:</label>
+            <input type="password" id="confirmPassword" placeholder="Confirm your password">
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('confirmPassword', this)">👁️</button>
+        </div>
+        <button type="button" class="password-generate" onclick="generateStrongPassword()">🎲 Generate Strong Password</button>
+        <div class="encryption-info">
+            ⚠️ <strong>Zero-knowledge encryption:</strong> Your files are encrypted in your browser before upload.
+            The password never leaves your device. If you lose it, your data is unrecoverable.
+        </div>
+    </div>
+</div>
 
 <div id="wrap">
     <div id="form">
@@ -38,10 +210,17 @@
 <tr><td id="message">Drag files here or click to upload<br/></td></tr>
 </table>
 
+<div class="qr-container" id="qrContainer">
+    <h3>✅ Upload Successful!</h3>
+    <div id="qrcode"></div>
+    <div class="share-links" id="shareLinks"></div>
+</div>
+
 <h2>Quick Start</h2>
 
 <h3>Web Upload</h3>
 <p>Drag and drop files above, or click to browse. Markdown files are rendered automatically.</p>
+<p>✨ <strong>New:</strong> Enable encryption for zero-knowledge privacy. Share the generated link with password embedded.</p>
 
 <h3>Command Line</h3>
 <pre><code># Basic upload
@@ -63,12 +242,14 @@ curl --data-binary @$\{1:--\} ${url.toString()}</code></pre>
 <h2>Features</h2>
 
 <ul>
+<li><strong>🔐 E2E Encryption</strong> - Optional zero-knowledge encryption in browser</li>
 <li><strong>📝 Text & Markdown</strong> - Automatic rendering of markdown</li>
 <li><strong>🖼️ Images</strong> - PNG, JPEG, GIF with instant preview</li>
 <li><strong>📄 Documents</strong> - PDFs, videos, any file type up to 10MB</li>
 <li><strong>🔗 Shareable Links</strong> - Append <code>&raw</code> for direct file access</li>
 <li><strong>⏰ Auto-Expiry</strong> - Default 1 year, configurable with X-TTL header</li>
 <li><strong>🗑️ Delete Control</strong> - Every upload gets a unique delete key</li>
+<li><strong>📱 QR Codes</strong> - Instant QR codes for easy mobile sharing</li>
 </ul>
 
 <h2>Deploy Your Own</h2>
@@ -88,6 +269,7 @@ curl --data-binary @$\{1:--\} ${url.toString()}</code></pre>
 <li><strong>Your Domain</strong> - Custom branding and control</li>
 <li><strong>Zero Maintenance</strong> - No servers, no updates, no downtime</li>
 <li><strong>Privacy</strong> - Your data stays in your KV namespace</li>
+<li><strong>E2E Encryption</strong> - Optional zero-knowledge security</li>
 </ul>
 
 <h2>Advanced Usage</h2>
@@ -113,9 +295,10 @@ tail -f app.log | curl --data-binary @- $GETPOST_URL</code></pre>
 <h2>Technical Details</h2>
 
 <p><strong>Architecture:</strong> Cloudflare Workers + KV storage, globally distributed edge computing</p>
+<p><strong>Encryption:</strong> NaCl SecretBox (XSalsa20-Poly1305) + Argon2i key derivation</p>
 <p><strong>Security:</strong> ULID-based access control, separate delete tokens, no central database</p>
 <p><strong>Performance:</strong> Sub-100ms response times worldwide, automatic CDN caching</p>
-<p><strong>Privacy:</strong> No tracking, no ads, no accounts required</p>
+<p><strong>Privacy:</strong> No tracking, no ads, no accounts required. Optional E2E encryption.</p>
 
 <blockquote>
 <p><strong>Open Source:</strong> CC0; No Rights Reserved. Fork it, hack it, improve it, deploy it everywhere.</p>
@@ -123,10 +306,87 @@ tail -f app.log | curl --data-binary @- $GETPOST_URL</code></pre>
 
 <p><a href="https://github.com/getpost-loves-you/getpost">📄 Source Code</a> | <a href="https://github.com/getpost-loves-you/getpost/blob/main/SETUP.md">🚀 Deploy Guide</a> | <a href="https://github.com/getpost-loves-you/getpost/issues">🐛 Report Issues</a></p>
 
+<script src="/naclfast.min.js"></script>
+<script src="/argon2bundled.min.js"></script>
+<script src="/qrcode.min.js"></script>
 <script>
+// Curated wordlist for password generation - loaded from /wordlist.txt
+// Initialize with fallback wordlist to prevent race conditions
+let WORDLIST = [
+    'penumbra', 'twilight', 'aurora', 'vesper', 'chrysalis', 'petrichor', 'solstice', 'liminal', 'threshold', 'ephemeral',
+    'luminous', 'nebula', 'cascade', 'resonance', 'prismatic', 'quintessence', 'ephemera', 'meridian', 'cipher', 'enigma'
+];
+
+// Load full wordlist from server (will replace fallback when loaded)
+fetch('/wordlist.txt')
+    .then(response => response.text())
+    .then(text => {
+        const words = text.trim().split('\n').filter(word => word.length > 0);
+        if (words.length > 0) {
+            WORDLIST = words;
+            console.log('Loaded ' + words.length + ' words for password generation');
+        }
+    })
+    .catch(err => {
+        console.warn('Failed to load full wordlist, using fallback:', err);
+    });
+
 var file;
 var file_buffer;
+var isEncryptionEnabled = false;
 const dropArea = document.getElementById('notpacman');
+const encryptToggle = document.getElementById('encryptToggle');
+const passwordFields = document.getElementById('passwordFields');
+
+function togglePasswordVisibility(inputId, button) {
+    const input = document.getElementById(inputId);
+    if (input.type === 'password') {
+        input.type = 'text';
+        button.textContent = '🙈';
+    } else {
+        input.type = 'password';
+        button.textContent = '👁️';
+    }
+}
+
+function generateStrongPassword() {
+    // Use crypto.getRandomValues for secure entropy
+    const numWords = 4;
+    const words = [];
+
+    for (let i = 0; i < numWords; i++) {
+        const randomValues = new Uint32Array(1);
+        crypto.getRandomValues(randomValues);
+        const index = randomValues[0] % WORDLIST.length;
+        words.push(WORDLIST[index]);
+    }
+
+    // Add a random number for extra entropy
+    const randomNum = crypto.getRandomValues(new Uint32Array(1))[0] % 1000;
+
+    const password = words.join('-') + '-' + randomNum;
+
+    document.getElementById('encryptPassword').value = password;
+    document.getElementById('confirmPassword').value = password;
+
+    // Briefly show the generated password
+    const encryptInput = document.getElementById('encryptPassword');
+    const confirmInput = document.getElementById('confirmPassword');
+    encryptInput.type = 'text';
+    confirmInput.type = 'text';
+
+    // Update eye buttons
+    document.querySelectorAll('.password-toggle').forEach(btn => btn.textContent = '🙈');
+}
+
+encryptToggle.addEventListener('change', function() {
+    isEncryptionEnabled = this.checked;
+    if (isEncryptionEnabled) {
+        passwordFields.classList.add('active');
+    } else {
+        passwordFields.classList.remove('active');
+    }
+});
 
 dropArea.addEventListener('dragover', (event) => {
   event.stopPropagation();
@@ -144,15 +404,160 @@ dropArea.addEventListener('drop', (event) => {
     document.getElementById("upfilename").innerHTML = "Filename: " + file.name;
 });
 
-function upload_file_directly() {
+async function deriveKey(password, salt) {
+    const passwordBytes = new TextEncoder().encode(password);
+    const opslimit = 3;
+    const memlimit = 262144;
+
+    const result = await argon2.hash({
+        pass: passwordBytes,
+        salt: salt,
+        time: opslimit,
+        mem: memlimit,
+        hashLen: 32,
+        parallelism: 1,
+        type: argon2.ArgonType.Argon2i
+    });
+
+    return new Uint8Array(result.hash);
+}
+
+async function encryptFile(fileBuffer, password) {
+    const message = new Uint8Array(fileBuffer);
+    const salt = nacl.randomBytes(16);
+    const key = await deriveKey(password, salt);
+    const nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+    const ciphertext = nacl.secretbox(message, nonce, key);
+
+    const output = new Uint8Array(1 + salt.length + nonce.length + ciphertext.length);
+    output[0] = 0;
+    output.set(salt, 1);
+    output.set(nonce, 1 + salt.length);
+    output.set(ciphertext, 1 + salt.length + nonce.length);
+
+    return output;
+}
+
+function copyToClipboard(text, element) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Visual feedback
+        element.classList.add('copied');
+        const feedback = element.querySelector('.copy-feedback');
+        if (feedback) {
+            feedback.classList.add('show');
+        }
+
+        setTimeout(() => {
+            element.classList.remove('copied');
+            if (feedback) {
+                feedback.classList.remove('show');
+            }
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+    });
+}
+
+function showQRCode(shareUrl) {
+    const qrContainer = document.getElementById('qrContainer');
+    const qrcodeDiv = document.getElementById('qrcode');
+    const shareLinksDiv = document.getElementById('shareLinks');
+
+    qrcodeDiv.innerHTML = '';
+
+    new QRCode(qrcodeDiv, {
+        text: shareUrl,
+        width: 256,
+        height: 256,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+    });
+
+    // Create elements properly to avoid escaping issues
+    const strongEl = document.createElement('strong');
+    strongEl.textContent = '📎 Share this link:';
+
+    const linkDiv = document.createElement('div');
+    linkDiv.className = 'share-link';
+    linkDiv.title = 'Click to copy';
+    linkDiv.textContent = shareUrl;
+    linkDiv.onclick = function() { copyToClipboard(shareUrl, this); };
+
+    const feedback = document.createElement('span');
+    feedback.className = 'copy-feedback';
+    feedback.textContent = '✓ Copied!';
+    linkDiv.appendChild(feedback);
+
+    shareLinksDiv.innerHTML = '';
+    shareLinksDiv.appendChild(strongEl);
+    shareLinksDiv.appendChild(linkDiv);
+
+    qrContainer.classList.add('active');
+
+    // Scroll to the QR container so it's visible
+    setTimeout(() => {
+        qrContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+}
+
+async function upload_file_directly() {
+    let uploadBuffer = file_buffer;
+    let password = '';
+    let originalMimeType = file.type || 'application/octet-stream';
+
+    if (isEncryptionEnabled) {
+        password = document.getElementById('encryptPassword').value;
+        const confirmPass = document.getElementById('confirmPassword').value;
+
+        if (!password) {
+            alert('Please enter a password for encryption');
+            return;
+        }
+
+        if (password !== confirmPass) {
+            alert('Passwords do not match!');
+            return;
+        }
+
+        document.getElementById('message').innerHTML = 'Encrypting file...<br/>';
+
+        try {
+            uploadBuffer = await encryptFile(file_buffer, password);
+            document.getElementById('message').innerHTML = 'File encrypted! Uploading...<br/>';
+        } catch (error) {
+            alert('Encryption failed: ' + error.message);
+            return;
+        }
+    }
+
     var oReq = new XMLHttpRequest();
     oReq.open("POST", "/post", true);
+    oReq.setRequestHeader("Accept", "application/json");
+    oReq.responseType = 'json';
     oReq.onload = function (oEvent) {
         console.log(oReq.response);
-        document.body.innerHTML = oReq.response
+
+        if (oReq.response && oReq.response.share_url) {
+            let shareUrl = oReq.response.share_url;
+
+            if (isEncryptionEnabled && password) {
+                // Encode MIME type and filename in fragment along with password
+                shareUrl = shareUrl + '#;;;' + encodeURIComponent(password) + ';;;' + encodeURIComponent(originalMimeType) + ';;;' + encodeURIComponent(file.name);
+            }
+
+            showQRCode(shareUrl);
+            document.getElementById('message').innerHTML = '✅ Upload successful!<br/>';
+        } else {
+            document.body.innerHTML = JSON.stringify(oReq.response);
+        }
     };
-    oReq.overrideMimeType(document.getElementById("upfiletype").innerHTML);
-    var blob = new Blob([file_buffer], {type: 'application/x-www-form-urlencoded'});
+    oReq.onerror = function() {
+        alert('Upload failed!');
+    };
+
+    var blob = new Blob([uploadBuffer], {type: 'application/x-www-form-urlencoded'});
     oReq.send(blob);
 };
 
