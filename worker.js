@@ -160,6 +160,7 @@ expires at: ${responseData.expires_at}`;
         const key = url.searchParams.get("key");
         const raw = url.searchParams.has("raw");
         const customContentType = url.searchParams.get("content_type");
+        const customTitle = url.searchParams.get("title");
 
         // if no key parameter provided, return the upload prompt so user can upload
         if (!url.searchParams.has("key")) {
@@ -222,7 +223,8 @@ expires at: ${responseData.expires_at}`;
           const [generatedBodyHtml, type] = generateHtmlBasedOnType(
             contentFromKeyAsArrayBuffer,
             url,
-            metadata
+            metadata,
+            customTitle
           );
           if (raw) {
             // Check if custom content type is provided and validate it
@@ -452,7 +454,7 @@ function hex(uint8arr_or_arraybuffer) {
 }
 
 // content (and optional url) to wrapper html and detected type
-function generateHtmlBasedOnType(content, url = "", metadata = null) {
+function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
   if (metadata) {
     if (metadata.permanent) {
@@ -527,7 +529,7 @@ function generateHtmlBasedOnType(content, url = "", metadata = null) {
       injectorScript = "";
       break;
   }
-  const TITLE = `GetPost: ${type}`;
+  const TITLE = customTitle || `GetPost: ${type}`;
   let contentAsHtmlFromMarked = "";
   let imageUrl = "";
   let description = "";
