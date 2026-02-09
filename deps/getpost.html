@@ -441,8 +441,20 @@
           }
       });
 
-      window.addEventListener('load', function() {
-          checkIfEncrypted();
+      window.addEventListener('load', async function() {
+          // Verify crypto libraries loaded before checking encryption
+          if (typeof nacl === 'undefined' || typeof argon2 === 'undefined') {
+              console.error('Crypto libraries failed to load');
+              showStatus('Failed to load encryption libraries. Please refresh the page.', 'error');
+              return;
+          }
+
+          try {
+              await checkIfEncrypted();
+          } catch (error) {
+              console.error('Failed to initialize encryption:', error);
+              showStatus('Failed to initialize decryption. Please refresh the page.', 'error');
+          }
       });
 
       ${injectorScript};
