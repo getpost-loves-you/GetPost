@@ -259,8 +259,8 @@
 
       async function deriveKey(password, salt) {
           const passwordBytes = new TextEncoder().encode(password);
-          const opslimit = 3;
-          const memlimit = 262144;
+          const opslimit = 4;
+          const memlimit = 65536;  // 64 MB (in KB)
 
           const result = await argon2.hash({
               pass: passwordBytes,
@@ -269,7 +269,7 @@
               mem: memlimit,
               hashLen: 32,
               parallelism: 1,
-              type: argon2.ArgonType.Argon2i
+              type: argon2.ArgonType.Argon2id
           });
 
           return new Uint8Array(result.hash);
