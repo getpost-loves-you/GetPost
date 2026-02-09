@@ -33,7 +33,7 @@ except ImportError:
 class PastebinCrypter:
     """Encrypt and upload content to pastebin with E2E encryption"""
 
-    ARGON2_VARIANT = nacl.pwhash.argon2i
+    ARGON2_VARIANT = nacl.pwhash.argon2id
     SALT_SIZE = 16
     ENCRYPTED_MARKER = b'\x00'
 
@@ -99,13 +99,13 @@ class PastebinCrypter:
         return f"{'-'.join(selected)}-{number}"
 
     def derive_key(self, password: bytes, salt: bytes) -> bytes:
-        """Derive encryption key using Argon2i"""
+        """Derive encryption key using Argon2id"""
         return self.ARGON2_VARIANT.kdf(
             size=32,
             password=password,
             salt=salt,
-            opslimit=nacl.pwhash.OPSLIMIT_MODERATE,
-            memlimit=nacl.pwhash.MEMLIMIT_MODERATE,
+            opslimit=4,
+            memlimit=67108864,  # 64 MB
         )
 
     def encrypt(self, content: bytes) -> bytes:

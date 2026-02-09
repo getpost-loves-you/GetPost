@@ -100,6 +100,7 @@ User → Cloudflare Edge → Worker → KV Storage
 - **KV Storage:** Eventually-consistent key-value store, AES-256 encrypted
 - **ULIDs:** Lexicographically sortable identifiers for posts and delete keys
 - **Zero dependencies:** Self-contained, no external services
+- **Crypto Libraries:** [TweetNaCl.js](https://github.com/dchest/tweetnacl-js) for encryption, [argon2-browser](https://github.com/antelle/argon2-browser) for key derivation
 
 ### Why Cloudflare Workers?
 
