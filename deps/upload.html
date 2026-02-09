@@ -295,7 +295,7 @@ tail -f app.log | curl --data-binary @- $GETPOST_URL</code></pre>
 <h2>Technical Details</h2>
 
 <p><strong>Architecture:</strong> Cloudflare Workers + KV storage, globally distributed edge computing</p>
-<p><strong>Encryption:</strong> NaCl SecretBox (XSalsa20-Poly1305) + Argon2i key derivation</p>
+<p><strong>Encryption:</strong> NaCl SecretBox (XSalsa20-Poly1305) + Argon2id key derivation</p>
 <p><strong>Security:</strong> ULID-based access control, separate delete tokens, no central database</p>
 <p><strong>Performance:</strong> Sub-100ms response times worldwide, automatic CDN caching</p>
 <p><strong>Privacy:</strong> No tracking, no ads, no accounts required. Optional E2E encryption.</p>
@@ -406,8 +406,8 @@ dropArea.addEventListener('drop', (event) => {
 
 async function deriveKey(password, salt) {
     const passwordBytes = new TextEncoder().encode(password);
-    const opslimit = 3;
-    const memlimit = 262144;
+    const opslimit = 4;
+    const memlimit = 65536;  // 64 MB (in KB)
 
     const result = await argon2.hash({
         pass: passwordBytes,
@@ -416,7 +416,7 @@ async function deriveKey(password, salt) {
         mem: memlimit,
         hashLen: 32,
         parallelism: 1,
-        type: argon2.ArgonType.Argon2i
+        type: argon2.ArgonType.Argon2id
     });
 
     return new Uint8Array(result.hash);
