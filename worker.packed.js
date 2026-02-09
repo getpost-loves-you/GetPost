@@ -680,7 +680,7 @@ addEventListener("fetch", (fetch_event) => {
 // main entrypoint for all requests
 async function HANDLER(fetch_event) {
   const now = Date.now();
-  request = fetch_event.request;
+  const request = fetch_event.request;
   let headers = [...request.headers];
   for (const key in request.cf) {
     headers = headers.concat([
@@ -733,6 +733,10 @@ async function HANDLER(fetch_event) {
           xTtlSeconds = 24 * 60 * 60 * 30 * 12; // 1 year
         } else {
           xTtlSeconds = parseInt(xTtlSeconds, 10);
+          // Validate parsed value - must be a positive number
+          if (isNaN(xTtlSeconds) || xTtlSeconds <= 0) {
+            xTtlSeconds = 24 * 60 * 60 * 30 * 12; // default to 1 year
+          }
         }
 
         const expiryTime = new Date(xTtlSeconds * 1000 + now).toISOString();
@@ -1106,7 +1110,7 @@ tail -f app.log | curl --data-binary @- $GETPOST_URL</code></pre>
 <h2>Technical Details</h2>
 
 <p><strong>Architecture:</strong> Cloudflare Workers + KV storage, globally distributed edge computing</p>
-<p><strong>Encryption:</strong> NaCl SecretBox (XSalsa20-Poly1305) + Argon2i key derivation</p>
+<p><strong>Encryption:</strong> NaCl SecretBox (XSalsa20-Poly1305) + Argon2id key derivation</p>
 <p><strong>Security:</strong> ULID-based access control, separate delete tokens, no central database</p>
 <p><strong>Performance:</strong> Sub-100ms response times worldwide, automatic CDN caching</p>
 <p><strong>Privacy:</strong> No tracking, no ads, no accounts required. Optional E2E encryption.</p>
@@ -1217,8 +1221,8 @@ dropArea.addEventListener('drop', (event) => {
 
 async function deriveKey(password, salt) {
     const passwordBytes = new TextEncoder().encode(password);
-    const opslimit = 3;
-    const memlimit = 262144;
+    const opslimit = 4;
+    const memlimit = 65536;  // 64 MB (in KB)
 
     const result = await argon2.hash({
         pass: passwordBytes,
@@ -1227,7 +1231,7 @@ async function deriveKey(password, salt) {
         mem: memlimit,
         hashLen: 32,
         parallelism: 1,
-        type: argon2.ArgonType.Argon2i
+        type: argon2.ArgonType.Argon2id
     });
 
     return new Uint8Array(result.hash);
@@ -1368,7 +1372,8 @@ async function upload_file_directly() {
         alert('Upload failed!');
     };
 
-    var blob = new Blob([uploadBuffer], {type: 'application/x-www-form-urlencoded'});
+    // Use application/octet-stream for binary data uploads
+    var blob = new Blob([uploadBuffer], {type: 'application/octet-stream'});
     oReq.send(blob);
 };
 
@@ -1683,6 +1688,18 @@ function hex(uint8arr_or_arraybuffer) {
   return hexStr;
 }
 
+// Sanitize HTML to prevent XSS attacks
+function sanitizeHtml(str) {
+  if (!str) return str;
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;');
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -1782,7 +1799,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
       injectorScript = "";
       break;
   }
-  const TITLE = customTitle || `GetPost: ${type}`;
+  // Sanitize customTitle to prevent XSS, and limit length
+  const sanitizedTitle = customTitle ? sanitizeHtml(customTitle).substring(0, 100) : null;
+  const TITLE = sanitizedTitle || `GetPost: ${type}`;
   let contentAsHtmlFromMarked = "";
   let imageUrl = "";
   let description = "";
@@ -2063,8 +2082,8 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
 
       async function deriveKey(password, salt) {
           const passwordBytes = new TextEncoder().encode(password);
-          const opslimit = 3;
-          const memlimit = 262144;
+          const opslimit = 4;
+          const memlimit = 65536;  // 64 MB (in KB)
 
           const result = await argon2.hash({
               pass: passwordBytes,
@@ -2073,7 +2092,7 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
               mem: memlimit,
               hashLen: 32,
               parallelism: 1,
-              type: argon2.ArgonType.Argon2i
+              type: argon2.ArgonType.Argon2id
           });
 
           return new Uint8Array(result.hash);
@@ -2245,8 +2264,20 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
           }
       });
 
-      window.addEventListener('load', function() {
-          checkIfEncrypted();
+      window.addEventListener('load', async function() {
+          // Verify crypto libraries loaded before checking encryption
+          if (typeof nacl === 'undefined' || typeof argon2 === 'undefined') {
+              console.error('Crypto libraries failed to load');
+              showStatus('Failed to load encryption libraries. Please refresh the page.', 'error');
+              return;
+          }
+
+          try {
+              await checkIfEncrypted();
+          } catch (error) {
+              console.error('Failed to initialize encryption:', error);
+              showStatus('Failed to initialize decryption. Please refresh the page.', 'error');
+          }
       });
 
       ${injectorScript};
