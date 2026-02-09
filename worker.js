@@ -39,7 +39,7 @@ addEventListener("fetch", (fetch_event) => {
 // main entrypoint for all requests
 async function HANDLER(fetch_event) {
   const now = Date.now();
-  request = fetch_event.request;
+  const request = fetch_event.request;
   let headers = [...request.headers];
   for (const key in request.cf) {
     headers = headers.concat([
@@ -92,6 +92,10 @@ async function HANDLER(fetch_event) {
           xTtlSeconds = 24 * 60 * 60 * 30 * 12; // 1 year
         } else {
           xTtlSeconds = parseInt(xTtlSeconds, 10);
+          // Validate parsed value - must be a positive number
+          if (isNaN(xTtlSeconds) || xTtlSeconds <= 0) {
+            xTtlSeconds = 24 * 60 * 60 * 30 * 12; // default to 1 year
+          }
         }
 
         const expiryTime = new Date(xTtlSeconds * 1000 + now).toISOString();
@@ -469,6 +473,18 @@ function hex(uint8arr_or_arraybuffer) {
   return hexStr;
 }
 
+// Sanitize HTML to prevent XSS attacks
+function sanitizeHtml(str) {
+  if (!str) return str;
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;');
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -568,7 +584,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
       injectorScript = "";
       break;
   }
-  const TITLE = customTitle || `GetPost: ${type}`;
+  // Sanitize customTitle to prevent XSS, and limit length
+  const sanitizedTitle = customTitle ? sanitizeHtml(customTitle).substring(0, 100) : null;
+  const TITLE = sanitizedTitle || `GetPost: ${type}`;
   let contentAsHtmlFromMarked = "";
   let imageUrl = "";
   let description = "";
