@@ -557,7 +557,8 @@ async function upload_file_directly() {
         alert('Upload failed!');
     };
 
-    var blob = new Blob([uploadBuffer], {type: 'application/x-www-form-urlencoded'});
+    // Use application/octet-stream for binary data uploads
+    var blob = new Blob([uploadBuffer], {type: 'application/octet-stream'});
     oReq.send(blob);
 };
 
