@@ -337,6 +337,8 @@ body {
     var originalFilename = null;
 
     async function checkIfEncrypted() {
+        // the server already typed the payload - only refetch the raw bytes when it's encrypted
+        if (payloadType !== 'application/x-encrypted') return false;
         try {
             var rawUrl = window.location.href.split('#')[0] + '&raw';
             var response = await fetch(rawUrl, {
