@@ -447,7 +447,11 @@ async function deriveKey(password, salt) {
 }
 
 async function doUpload() {
-    if (!fileBuffer) return;
+    if (!selectedFile) return;
+    if (!fileBuffer) {
+        // the read kicked off in handleFile may still be in flight for large files
+        fileBuffer = await selectedFile.arrayBuffer();
+    }
 
     var password = document.getElementById('passphrase').value;
     if (!password) {
