@@ -213,8 +213,12 @@ GET /post?key=ULID&cors=1   # With CORS headers
 
 ### Delete
 ```bash
-GET /post?key=ULID&del=DELETE_KEY
+POST /post?key=ULID&del=DELETE_KEY
+
+# e.g.
+curl -X POST "https://your-domain.com/post?key=ULID&del=DELETE_KEY"
 ```
+GET on a delete link returns a confirmation page instead of deleting, so link-preview crawlers can't destroy content.
 
 ### Debug
 ```bash
