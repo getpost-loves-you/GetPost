@@ -70,8 +70,7 @@ async function HANDLER(fetch_event) {
           return await deletePost(url);
         }
         // Accept any reasonable content for uploads
-        let blob = await request.arrayBuffer();
-        blob = await new Blob([blob]).arrayBuffer();
+        const blob = await request.arrayBuffer();
         requestBodyForDebug = blob.slice(0, 20);
 
         // advertised limit is 10MB (plus slack for the encryption container overhead)
