@@ -89,12 +89,14 @@ async function HANDLER(fetch_event) {
         // Handle TTL
         let xTtlSeconds = requestHeadersAndFriends["x-ttl"];
         if (xTtlSeconds === undefined) {
-          xTtlSeconds = 24 * 60 * 60 * 30 * 12; // 1 year
+          xTtlSeconds = 365 * 24 * 60 * 60; // 1 year
         } else {
           xTtlSeconds = parseInt(xTtlSeconds, 10);
           // Validate parsed value - must be a positive number
           if (isNaN(xTtlSeconds) || xTtlSeconds <= 0) {
-            xTtlSeconds = 24 * 60 * 60 * 30 * 12; // default to 1 year
+            xTtlSeconds = 365 * 24 * 60 * 60; // default to 1 year
+          } else if (xTtlSeconds < 60) {
+            xTtlSeconds = 60; // KV rejects expirationTtl below 60 seconds
           }
         }
 
