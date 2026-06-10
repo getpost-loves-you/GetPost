@@ -242,6 +242,16 @@ expires at: ${responseData.expires_at}`;
             url,
           );
         }
+      } else {
+        // other methods (e.g. HEAD from link previewers) used to fall through to an undefined response
+        return buildResponse(
+          "Method not allowed - use GET or POST.",
+          DEFAULT_MIME_TEXT, {
+            Allow: "GET, POST, OPTIONS"
+          },
+          405,
+          url,
+        );
       }
     } else if (url.pathname === "/headers") {
       // helpful debug endpoint - return the headersAndFriends object, as a nicely formatted string
