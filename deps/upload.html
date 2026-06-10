@@ -73,6 +73,35 @@ body {
     font-size: 13px;
 }
 
+.drop-zone p a {
+    color: #48bb78;
+    text-decoration: none;
+}
+
+.drop-zone p a:hover { text-decoration: underline; }
+
+.drop-zone.text-mode {
+    cursor: text;
+    align-items: stretch;
+    justify-content: flex-start;
+}
+
+#textInput {
+    display: none;
+    flex: 1;
+    width: 100%;
+    background: none;
+    border: none;
+    outline: none;
+    resize: none;
+    color: #b0b0b0;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 1rem;
+}
+
+#textInput.active { display: block; }
+
 .file-meta {
     display: none;
     text-align: left;
@@ -283,14 +312,15 @@ input[type="file"] { display: none; }
 
 <div class="prompt">$ upload <span class="cursor"></span></div>
 
-<div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-    <p id="dropHint">drop file here or click to select</p>
+<div class="drop-zone" id="dropZone" onclick="dropZoneClick()">
+    <p id="dropHint">drop file here, click to select, or <a href="#" id="pasteToggle">paste text</a></p>
     <div class="file-meta" id="fileMeta">
         <div class="line">name: <span class="val" id="metaName"></span></div>
         <div class="line">type: <span class="val" id="metaType"></span></div>
         <div class="line">size: <span class="val" id="metaSize"></span></div>
-        <div class="line status-line" id="statusLine"></div>
     </div>
+    <textarea id="textInput" placeholder="type or paste text here" spellcheck="false"></textarea>
+    <div class="line status-line" id="statusLine"></div>
 </div>
 
 <div class="password-section" id="passwordSection">
@@ -385,6 +415,34 @@ function showFile(f) {
 var selectedFile = null;
 var fileBuffer = null;
 var currentShareUrl = '';
+var textMode = false;
+
+function dropZoneClick() {
+    if (textMode) return;
+    document.getElementById('fileInput').click();
+}
+
+function enterTextMode() {
+    textMode = true;
+    selectedFile = null;
+    fileBuffer = null;
+    document.getElementById('dropZone').classList.add('text-mode');
+    document.getElementById('dropHint').style.display = 'none';
+    document.getElementById('fileMeta').style.display = 'none';
+    var ta = document.getElementById('textInput');
+    ta.classList.add('active');
+    ta.focus();
+    document.getElementById('passwordSection').classList.add('active');
+    if (!document.getElementById('passphrase').value) {
+        document.getElementById('passphrase').value = generatePassphrase();
+    }
+}
+
+function exitTextMode() {
+    textMode = false;
+    document.getElementById('dropZone').classList.remove('text-mode');
+    document.getElementById('textInput').classList.remove('active');
+}
 
 function showQRCode(shareUrl) {
     currentShareUrl = shareUrl;
@@ -447,10 +505,29 @@ async function deriveKey(password, salt) {
 }
 
 async function doUpload() {
-    if (!selectedFile) return;
-    if (!fileBuffer) {
-        // the read kicked off in handleFile may still be in flight for large files
-        fileBuffer = await selectedFile.arrayBuffer();
+    var uploadName, uploadType;
+    if (textMode) {
+        var text = document.getElementById('textInput').value;
+        if (!text) {
+            setStatus('error: nothing to paste', 'err');
+            return;
+        }
+        fileBuffer = new TextEncoder().encode(text).buffer;
+        uploadName = 'paste.txt';
+        uploadType = 'text/plain';
+    } else {
+        if (!selectedFile) return;
+        if (!fileBuffer) {
+            // the read kicked off in handleFile may still be in flight for large files
+            fileBuffer = await selectedFile.arrayBuffer();
+        }
+        uploadName = selectedFile.name;
+        uploadType = selectedFile.type || 'application/octet-stream';
+    }
+
+    if (fileBuffer.byteLength > 10 * 1024 * 1024) {
+        setStatus('error: content exceeds the 10MB limit', 'err');
+        return;
     }
 
     var password = document.getElementById('passphrase').value;
@@ -510,11 +587,10 @@ async function doUpload() {
 
             xhr.onload = function() {
                 if (xhr.response && xhr.response.share_url) {
-                    var mimeType = selectedFile.type || 'application/octet-stream';
                     var shareUrl = xhr.response.share_url + '#;;;' +
                         encodeURIComponent(password) + ';;;' +
-                        encodeURIComponent(mimeType) + ';;;' +
-                        encodeURIComponent(selectedFile.name);
+                        encodeURIComponent(uploadType) + ';;;' +
+                        encodeURIComponent(uploadName);
                     setStatus('done', 'ok');
                     showQRCode(shareUrl);
                     showDeleteUrl(xhr.response.delete_url);
@@ -558,10 +634,17 @@ dropZone.addEventListener('drop', function(e) {
 fileInput.addEventListener('change', function(e) { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
 function handleFile(f) {
+    exitTextMode();
     selectedFile = f;
     f.arrayBuffer().then(function(buf) { fileBuffer = buf; });
     showFile(f);
 }
+
+document.getElementById('pasteToggle').addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation(); // don't trigger the drop zone's file picker
+    enterTextMode();
+});
 </script>
 </body>
 </html>
