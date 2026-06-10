@@ -250,6 +250,16 @@ body {
     margin-top: 0.3rem;
 }
 
+.delete-url {
+    font-size: 11px;
+    color: #555;
+    word-break: break-all;
+    margin-top: 0.6rem;
+}
+
+.delete-url a { color: #777; text-decoration: none; }
+.delete-url a:hover { color: #e53e3e; }
+
 .bottom {
     display: flex;
     justify-content: space-between;
@@ -306,6 +316,7 @@ input[type="file"] { display: none; }
     <div id="qrcode"></div>
     <div class="share-url" id="shareUrl" onclick="copyShareUrl()"></div>
     <div class="copy-hint" id="copyHint">click to copy</div>
+    <div class="delete-url" id="deleteUrl"></div>
 </div>
 
 <div class="bottom">
@@ -393,6 +404,17 @@ function showQRCode(shareUrl) {
 
     shareUrlDiv.textContent = shareUrl;
     qrSection.classList.add('active');
+}
+
+function showDeleteUrl(deleteUrl) {
+    if (!deleteUrl) return;
+    var el = document.getElementById('deleteUrl');
+    el.innerHTML = '';
+    el.appendChild(document.createTextNode('delete link (save it): '));
+    var a = document.createElement('a');
+    a.href = deleteUrl;
+    a.textContent = deleteUrl;
+    el.appendChild(a);
 }
 
 function copyShareUrl() {
@@ -491,6 +513,7 @@ async function doUpload() {
                         encodeURIComponent(selectedFile.name);
                     setStatus('done', 'ok');
                     showQRCode(shareUrl);
+                    showDeleteUrl(xhr.response.delete_url);
                     resolve();
                 } else {
                     setStatus('error: unexpected response', 'err');
