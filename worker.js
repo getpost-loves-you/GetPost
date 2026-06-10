@@ -55,17 +55,9 @@ async function HANDLER(fetch_event) {
     return handleCorsPreflightRequest(url);
   }
 
-  // Clone the request to avoid "body already used" errors in error handling
+  // first bytes of the request body, captured wherever the body is actually read -
+  // used by /headers and the error handler without buffering every upload twice
   let requestBodyForDebug = null;
-  try {
-    if (request.body) {
-      const clonedRequest = request.clone();
-      requestBodyForDebug = await clonedRequest.arrayBuffer();
-    }
-  } catch (e) {
-    // If cloning fails, we'll just not have debug info
-    requestBodyForDebug = new ArrayBuffer(0);
-  }
 
   // wrap main handler in a try/catch exception logging & reporting block, for easy debug
   try {
@@ -80,6 +72,7 @@ async function HANDLER(fetch_event) {
         // Accept any reasonable content for uploads
         let blob = await request.arrayBuffer();
         blob = await new Blob([blob]).arrayBuffer();
+        requestBodyForDebug = blob.slice(0, 20);
 
         // advertised limit is 10MB (plus slack for the encryption container overhead)
         if (blob.byteLength > 10 * 1024 * 1024 + 4096) {
@@ -270,6 +263,9 @@ expires at: ${responseData.expires_at}`;
       requestHeadersAndFriends.url = url.toString();
       requestHeadersAndFriends.method = request.method;
       // first 20 bytes (hex-encoded) of the request
+      if (request.body) {
+        requestBodyForDebug = await request.arrayBuffer();
+      }
       if (requestBodyForDebug && requestBodyForDebug.byteLength > 0) {
         requestHeadersAndFriends.startBodyHex = hex(
           requestBodyForDebug.slice(0, 20),
