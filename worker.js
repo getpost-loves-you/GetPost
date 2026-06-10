@@ -81,6 +81,16 @@ async function HANDLER(fetch_event) {
         let blob = await request.arrayBuffer();
         blob = await new Blob([blob]).arrayBuffer();
 
+        // advertised limit is 10MB (plus slack for the encryption container overhead)
+        if (blob.byteLength > 10 * 1024 * 1024 + 4096) {
+          return buildResponse(
+            "Sorry, content exceeds the 10MB limit!",
+            DEFAULT_MIME_TEXT, {},
+            413,
+            url,
+          );
+        }
+
         // Generate keys
         const storeKey = ulid(now);
         const editKey = ulid(now);
