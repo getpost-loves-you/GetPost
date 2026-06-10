@@ -132,7 +132,10 @@ X-TTL: 3600          # seconds until expiry
 
 # URL parameters
 ?raw                 # return original file
-?cors=1              # enable CORS headers</code></pre>
+?cors=1              # enable CORS headers
+
+# delete a post (deletion requires POST; GET shows a confirmation page)
+curl -X POST "https://your.domain/post?key=KEY&amp;del=DELETE_KEY"</code></pre>
 
 <h2>deploy your own</h2>
 <p>GetPost runs on Cloudflare Workers &mdash; zero servers, global distribution, generous free tier (100k reads, 1k uploads daily).</p>
