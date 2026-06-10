@@ -512,10 +512,12 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     // 00000000: 6674 7970 6d70 3432                      ftypmp42
     case "00000018":
     case "0000001c":
-      if (hex(contentAsUint8Array.slice(4, 12)) == "667479706d703432") {
+      if (hex(contentAsUint8Array.slice(4, 12)) === "667479706d703432") {
         type = "video/mp4";
-        break;
+      } else {
+        type = "application/octet-stream";
       }
+      break;
     case "25504446":
       type = "application/pdf";
       break;
