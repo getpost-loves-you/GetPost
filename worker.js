@@ -16,16 +16,12 @@ const favicon_gzip =
 // specific interpolated strings - those wrapped in single-backticks (`) - and prefaced by AUTOINSERT_
 // are found by a regular-expression search autoinsert.py and converted into corresponding filenames
 //
-// For example, AUTOINSERT_NOTPACMAN__SVG is replaced with the contents of notpacman.svg, in the deps directory
-//
 // This keeps the worker.js script simple, without requiring much build tooling!
 
-const notpacman_svg = `AUTOINSERT_NOTPACMAN__SVG`; // eslint-disable-line
-const getpost_css = `AUTOINSERT_GETPOST__CSS`; // eslint-disable-line
 const naclfast_base64 = `AUTOINSERT_NACLFAST__MIN__JS__BASE64`; // eslint-disable-line
 const argon2bundled_base64 = `AUTOINSERT_ARGON2BUNDLED__MIN__JS__BASE64`; // eslint-disable-line
 const qrcode_base64 = `AUTOINSERT_QRCODE__MIN__JS__BASE64`; // eslint-disable-line
-const wordlist_txt = `AUTOINSERT_WORDLIST__TXT`; // eslint-disable-line
+const marked_base64 = `AUTOINSERT_MARKED__MIN__JS__BASE64`; // eslint-disable-line
 
 const ENCODING_LEN = ENCODING.length;
 const TIME_LEN = 10;
@@ -305,9 +301,6 @@ expires at: ${responseData.expires_at}`;
     } else if (url.pathname === "/raise_exception") {
       // trigger an exception
       this_method_does_not_exist();
-    } else if (url.pathname === "/getpost.css") {
-      // return static css content
-      return buildResponse(getpost_css, "text/css", {}, 200, url);
     } else if (url.pathname === "/naclfast.min.js") {
       // return NaCl crypto library (base64 decoded)
       return buildResponse(str2ab(atob(naclfast_base64)), "application/javascript", {}, 200, url);
@@ -317,9 +310,13 @@ expires at: ${responseData.expires_at}`;
     } else if (url.pathname === "/qrcode.min.js") {
       // return QR code generation library (base64 decoded)
       return buildResponse(str2ab(atob(qrcode_base64)), "application/javascript", {}, 200, url);
-    } else if (url.pathname === "/wordlist.txt") {
-      // return wordlist for password generation
-      return buildResponse(wordlist_txt, "text/plain; charset=UTF-8", {}, 200, url);
+    } else if (url.pathname === "/marked.min.js") {
+      // return Marked markdown parser (base64 decoded)
+      return buildResponse(str2ab(atob(marked_base64)), "application/javascript", {}, 200, url);
+    } else if (url.pathname === "/about") {
+      // return about/docs page
+      const about_page = `AUTOINSERT_ABOUT__HTML`; // eslint-disable-line
+      return buildResponse(about_page, DEFAULT_MIME_HTML, {}, 200, url);
     } else if (url.pathname === "/favicon.ico") {
       // returning binary requires UTF-16 JS strings to be converted to ie) UTF-8 bytes
       return buildResponse(
