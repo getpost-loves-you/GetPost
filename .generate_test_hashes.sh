@@ -9,7 +9,7 @@ if [ $# -eq 0 ]; then
 fi
 
 NO_ULID='s/01\([A-Z0-9]*\).*//'
-NO_EXPIRY='s/Expires.*//'
+NO_EXPIRY='s/[Ee]xpires.*//'
 NO_URL='s!http\(s\)\{0,1\}://[^[:space:]]*!!g'
 
 source ."$1"
