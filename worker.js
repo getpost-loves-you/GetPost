@@ -473,22 +473,6 @@ function addCorsHeaders(headers, url) {
   return headers;
 }
 
-// returns a single byte from the Cloudflare worker's (cryptographically secure) RNG
-function prng() {
-  const buffer = new Uint8Array(8);
-  crypto.getRandomValues(buffer);
-  return buffer[0] / 0xff;
-}
-
-// get a random character from the set of encodings
-function randomChar() {
-  let rand = Math.floor(prng() * ENCODING_LEN);
-  if (rand === ENCODING_LEN) {
-    rand = ENCODING_LEN - 1;
-  }
-  return ENCODING.charAt(rand);
-}
-
 // shove time (or any integer) into "len" base32 characters
 function encodeTime(now, len) {
   let mod;
@@ -501,11 +485,14 @@ function encodeTime(now, len) {
   return str;
 }
 
-// get "len" random base32 characters
+// get "len" random base32 characters from the worker's (cryptographically secure) RNG
 function encodeRandom(len) {
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
   let str = "";
-  for (; len > 0; len--) {
-    str = randomChar() + str;
+  for (let i = 0; i < len; i++) {
+    // 256 % 32 === 0, so the modulo is unbiased
+    str += ENCODING.charAt(bytes[i] % ENCODING_LEN);
   }
   return str;
 }
