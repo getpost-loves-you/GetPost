@@ -27,6 +27,14 @@ const ENCODING_LEN = ENCODING.length;
 const TIME_LEN = 10;
 const RANDOM_LEN = 16;
 
+// embedded libraries only change on deploy; content can linger as long as delete propagation (~3min)
+const CACHE_STATIC = {
+  "Cache-Control": "public, max-age=86400"
+};
+const CACHE_CONTENT = {
+  "Cache-Control": "public, max-age=300"
+};
+
 addEventListener("fetch", (fetch_event) => {
   // configure primary entrypoint
   fetch_event.respondWith(HANDLER(fetch_event));
@@ -224,7 +232,8 @@ expires at: ${responseData.expires_at}`;
             // if requested as raw, return the original resp object with detected or custom MIME type
             return buildResponse(
               contentFromKeyAsArrayBuffer,
-              responseContentType, {},
+              responseContentType,
+              CACHE_CONTENT,
               200,
               url,
             );
@@ -233,7 +242,8 @@ expires at: ${responseData.expires_at}`;
           else {
             return buildResponse(
               generatedBodyHtml,
-              DEFAULT_MIME_HTML, {},
+              DEFAULT_MIME_HTML,
+              CACHE_CONTENT,
               200,
               url,
             );
@@ -291,16 +301,16 @@ expires at: ${responseData.expires_at}`;
       this_method_does_not_exist();
     } else if (url.pathname === "/naclfast.min.js") {
       // return NaCl crypto library (base64 decoded)
-      return buildResponse(str2ab(atob(naclfast_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(naclfast_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/argon2bundled.min.js") {
       // return Argon2 key derivation library (base64 decoded)
-      return buildResponse(str2ab(atob(argon2bundled_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(argon2bundled_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/qrcode.min.js") {
       // return QR code generation library (base64 decoded)
-      return buildResponse(str2ab(atob(qrcode_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(qrcode_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/marked.min.js") {
       // return Marked markdown parser (base64 decoded)
-      return buildResponse(str2ab(atob(marked_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(marked_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/about") {
       // return about/docs page
       const about_page = `AUTOINSERT_ABOUT__HTML`; // eslint-disable-line
@@ -309,9 +319,10 @@ expires at: ${responseData.expires_at}`;
       // returning binary requires UTF-16 JS strings to be converted to ie) UTF-8 bytes
       return buildResponse(
         str2ab(atob(favicon_gzip)),
-        "image/x-icon", {
+        "image/x-icon",
+        Object.assign({
           "Content-Encoding": "gzip"
-        },
+        }, CACHE_STATIC),
         200,
         url,
       );
@@ -684,7 +695,8 @@ function buildResponse(
   statuscode = 200,
   url = null
 ) {
-  const headersObj = Object.assign(headers, {
+  // copy rather than mutate, so shared header constants stay clean across requests
+  const headersObj = Object.assign({}, headers, {
     "content-type": type
   });
 
