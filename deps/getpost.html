@@ -370,7 +370,7 @@ body {
                         }
                         showStatus('passphrase loaded, decrypting...', 'info');
                         setTimeout(function() { decryptContent(); }, 500);
-                        history.replaceState(null, null, window.location.pathname + window.location.search);
+                        // keep the fragment: stripping it made the address-bar URL unshareable
                     }
                 }
                 return true;
