@@ -320,8 +320,8 @@ input[type="file"] { display: none; }
 </div>
 
 <div class="bottom">
-    <span>e2e encrypted</span>
-    <span>curl --data-binary @file ${url.toString()}</span>
+    <span>e2e encrypted (web uploads)</span>
+    <span>curl --data-binary @file ${url.toString()} &mdash; stored unencrypted</span>
 </div>
 
 <input type="file" id="fileInput">
