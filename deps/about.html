@@ -1,0 +1,158 @@
+<html><head>
+<title>GetPost — About</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #0d0d0d;
+    color: #b0b0b0;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+    font-size: 14px;
+    line-height: 1.7;
+}
+
+a { color: #48bb78; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1 {
+    color: #e0e0e0;
+    font-size: 1.4rem;
+    font-weight: 400;
+    margin-bottom: 0.5rem;
+}
+
+h2 {
+    color: #999;
+    font-size: 1rem;
+    font-weight: 400;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid #222;
+    padding-bottom: 0.3rem;
+}
+
+p { margin-bottom: 0.75rem; }
+
+pre {
+    background: #141414;
+    border: 1px solid #222;
+    border-radius: 2px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+code {
+    background: #1a1a1a;
+    padding: 0.1rem 0.3rem;
+    border-radius: 2px;
+    font-size: 13px;
+}
+
+pre code {
+    background: none;
+    padding: 0;
+}
+
+ul {
+    list-style: none;
+    margin-bottom: 1rem;
+}
+
+ul li {
+    margin-bottom: 0.3rem;
+}
+
+ul li:before {
+    content: "- ";
+    color: #444;
+}
+
+.back {
+    display: inline-block;
+    margin-bottom: 2rem;
+    color: #555;
+    font-size: 12px;
+}
+
+.back:hover { color: #888; }
+
+.muted { color: #555; }
+.footer { margin-top: 3rem; color: #333; font-size: 12px; border-top: 1px solid #1a1a1a; padding-top: 1rem; }
+</style>
+</head>
+<body>
+
+<a href="/" class="back">&lt; back</a>
+
+<h1>getpost</h1>
+<p>End-to-end encrypted file sharing on Cloudflare Workers. No accounts, no tracking, globally distributed.</p>
+<p>All uploads are encrypted in your browser before leaving your device. The server never sees your plaintext or your passphrase.</p>
+
+<h2>web upload</h2>
+<p>Drop a file on the <a href="/">main page</a>. A passphrase is generated automatically. Share the resulting link &mdash; the passphrase is embedded in the URL fragment (never sent to the server).</p>
+
+<h2>command line</h2>
+<pre><code># basic upload
+curl --data-binary @myfile.txt ${url.toString()}
+
+# upload from clipboard (macOS)
+pbpaste | curl --data-binary @- ${url.toString()}
+
+# custom expiration (1 hour)
+curl -H "X-TTL: 3600" --data-binary @file.txt ${url.toString()}</code></pre>
+
+<p>CLI uploads are stored unencrypted unless you encrypt the file yourself before uploading.</p>
+
+<h2>one-liner script</h2>
+<p>Save as <code>/usr/local/bin/pastebin</code> and make executable:</p>
+<pre><code>#!/bin/bash
+curl --data-binary @$\{1:--\} ${url.toString()}</code></pre>
+<p>Usage: <code>pastebin myfile.txt</code> or <code>echo "hello" | pastebin</code></p>
+
+<h2>features</h2>
+<ul>
+<li>E2E encryption &mdash; NaCl SecretBox (XSalsa20-Poly1305) + Argon2id key derivation</li>
+<li>Text &amp; markdown rendered automatically</li>
+<li>Images, PDFs, videos, any file up to 10 MB</li>
+<li>Append <code>&amp;raw</code> to any link for the original file</li>
+<li>Default expiry: 1 year, configurable via <code>X-TTL</code> header (seconds)</li>
+<li>Every upload gets a unique delete key</li>
+</ul>
+
+<h2>headers &amp; parameters</h2>
+<pre><code># custom expiration
+X-TTL: 3600          # seconds until expiry
+
+# URL parameters
+?raw                 # return original file
+?cors=1              # enable CORS headers</code></pre>
+
+<h2>deploy your own</h2>
+<p>GetPost runs on Cloudflare Workers &mdash; zero servers, global distribution, generous free tier (100k reads, 1k uploads daily).</p>
+<ul>
+<li>Clone: <code>git clone https://github.com/getpost-loves-you/getpost</code></li>
+<li>Setup: follow <code>SETUP.md</code></li>
+<li>Deploy: <code>./deploy.sh mydomain</code></li>
+</ul>
+
+<h2>technical details</h2>
+<ul>
+<li>Architecture: Cloudflare Workers + KV storage, edge computing</li>
+<li>Encryption: NaCl SecretBox + Argon2id (4 iterations, 64 MB memory)</li>
+<li>IDs: ULID-based, separate delete tokens</li>
+<li>Performance: sub-100ms response times worldwide</li>
+</ul>
+
+<div class="footer">
+    <p>CC0 &mdash; No Rights Reserved. <a href="https://github.com/getpost-loves-you/getpost">source</a></p>
+</div>
+
+</body>
+</html>
