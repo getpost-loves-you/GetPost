@@ -430,8 +430,15 @@ body {
                 throw new Error('invalid encrypted data format');
             }
 
-            var salt = encryptedData.slice(1, 17);
-            var nonceAndCiphertext = encryptedData.slice(17);
+            // new containers start 0x00 "GPE1"; legacy ones used a bare 0x00
+            var headerLen = 1;
+            if (encryptedData.length > 5 &&
+                encryptedData[1] === 0x47 && encryptedData[2] === 0x50 &&
+                encryptedData[3] === 0x45 && encryptedData[4] === 0x31) {
+                headerLen = 5;
+            }
+            var salt = encryptedData.slice(headerLen, headerLen + 16);
+            var nonceAndCiphertext = encryptedData.slice(headerLen + 16);
             var nonceSize = nacl.secretbox.nonceLength;
 
             if (nonceAndCiphertext.length < nonceSize) {
