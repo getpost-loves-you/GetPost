@@ -1,471 +1,576 @@
 <html>
 <head>
-<!-- Primary Meta Tags -->
-<title>GetPost: Content</title>
+<title>${TITLE}</title>
 <meta name="title" content="${TITLE}">
 <meta name="description" content="${description}">
-
-<!-- Open Graph / Facebook -->
 <meta property="og:url" content="${url.toString()}">
 <meta property="og:title" content="${TITLE}">
 <meta property="og:description" content="${description}">
 <meta property="og:image" content="${imageUrl}">
-
-<!-- Twitter -->
 <meta property="twitter:card" content="summary_large_image">
 <meta property="twitter:url" content="${url.toString()}">
 <meta property="twitter:title" content="${TITLE}">
 <meta property="twitter:description" content="${description}">
 <meta property="twitter:image" content="${imageUrl}">
-
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #0d0d0d;
+    color: #b0b0b0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* top bar - terminal style */
+.top-bar {
+    background: #111;
+    color: #555;
+    border-bottom: 1px solid #1a1a1a;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 12px;
+    padding: 0.6rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.top-bar a { color: #555; text-decoration: none; }
+.top-bar a:hover { color: #888; }
+.top-bar .expires { color: #444; }
+
+/* content area */
+.content-wrap {
+    flex: 1;
+    max-width: 780px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 2.5rem 2rem;
+}
+
+/* rendered markdown / text */
+#markdownContent,
+#decryptedContent {
+    font-family: 'Charter', 'Bitstream Charter', 'Sitka Text', 'Cambria', Georgia, serif;
+    font-size: 17px;
+    line-height: 1.7;
+    color: #ccc;
+}
+
+#markdownContent h1, #decryptedContent h1 { font-size: 1.8em; margin: 0.8em 0 0.4em; color: #e0e0e0; font-weight: 600; }
+#markdownContent h2, #decryptedContent h2 { font-size: 1.4em; margin: 1.2em 0 0.4em; color: #e0e0e0; font-weight: 600; }
+#markdownContent h3, #decryptedContent h3 { font-size: 1.15em; margin: 1em 0 0.3em; color: #e0e0e0; font-weight: 600; }
+
+#markdownContent p, #decryptedContent p { margin-bottom: 1em; }
+
+#markdownContent a, #decryptedContent a { color: #48bb78; text-decoration: underline; text-decoration-color: #2d7a4d; }
+#markdownContent a:hover, #decryptedContent a:hover { text-decoration-color: #48bb78; }
+
+#markdownContent code, #decryptedContent code {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    background: #1a1a1a;
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+    font-size: 0.88em;
+    color: #c8c8c8;
+}
+
+#markdownContent pre, #decryptedContent pre {
+    background: #141414;
+    color: #c8c8c8;
+    border: 1px solid #222;
+    padding: 1rem 1.25rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 1em 0;
+    line-height: 1.5;
+}
+
+#markdownContent pre code, #decryptedContent pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: 13px;
+}
+
+#markdownContent blockquote, #decryptedContent blockquote {
+    border-left: 3px solid #333;
+    padding-left: 1em;
+    margin: 1em 0;
+    color: #888;
+    font-style: italic;
+}
+
+#markdownContent ul, #markdownContent ol,
+#decryptedContent ul, #decryptedContent ol {
+    margin: 0.5em 0 1em 1.5em;
+}
+
+#markdownContent li, #decryptedContent li { margin-bottom: 0.3em; }
+
+#markdownContent img, #decryptedContent img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 1em 0;
+}
+
+#markdownContent hr, #decryptedContent hr {
+    border: none;
+    border-top: 1px solid #2a2a2a;
+    margin: 2em 0;
+}
+
+/* image content */
+#content img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+/* decrypt interface */
 .decrypt-interface {
-    max-width: 600px;
-    margin: 40px auto;
-    padding: 30px;
-    background: #2a2828;
-    border: 2px solid #ed8936;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    max-width: 420px;
+    margin: 80px auto;
+    padding: 2rem;
+    border: 1px solid #2a2a2a;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
 }
-.decrypt-interface h2 {
-    margin-top: 0;
-    color: #f5f3f3;
+
+.decrypt-interface .heading {
+    color: #888;
+    margin-bottom: 1.25rem;
 }
-.decrypt-interface p {
-    color: #d1d0d0;
-}
+
 .decrypt-field {
-    margin: 20px 0;
+    margin-bottom: 1rem;
     position: relative;
 }
+
 .decrypt-field label {
     display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: #f5f3f3;
+    margin-bottom: 0.4rem;
+    color: #666;
+    font-size: 12px;
 }
+
 .decrypt-field input {
     width: 100%;
-    padding: 12px 40px 12px 12px;
-    border: 2px solid #555;
-    border-radius: 6px;
-    font-size: 16px;
-    box-sizing: border-box;
-    background: #1a1818;
-    color: #f5f3f3;
-}
-.decrypt-field input:focus {
+    padding: 0.5rem 2.5rem 0.5rem 0.6rem;
+    border: 1px solid #333;
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: 13px;
+    background: #1a1a1a;
+    color: #48bb78;
     outline: none;
-    border-color: #ed8936;
+    box-sizing: border-box;
 }
+
+.decrypt-field input:focus {
+    border-color: #48bb78;
+}
+
 .password-toggle {
     position: absolute;
-    right: 10px;
-    top: 38px;
+    right: 6px;
+    top: 26px;
     background: none;
     border: none;
     cursor: pointer;
-    font-size: 18px;
-    padding: 5px;
-    color: #999;
+    font-size: 14px;
+    color: #555;
     user-select: none;
+    padding: 4px;
 }
-.password-toggle:hover {
-    color: #f5f3f3;
-}
+
+.password-toggle:hover { color: #888; }
+
 .decrypt-button {
     width: 100%;
-    padding: 14px;
-    background: #ed8936;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 16px;
-    font-weight: 600;
+    padding: 0.5rem;
+    background: none;
+    color: #48bb78;
+    border: 1px solid #48bb78;
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: 13px;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: background 0.2s;
 }
+
 .decrypt-button:hover {
-    background: #dd6b20;
+    background: rgba(72, 187, 120, 0.1);
 }
+
 .decrypt-button:disabled {
-    background: #555;
+    color: #555;
+    border-color: #333;
     cursor: not-allowed;
 }
+
 .decrypt-status {
-    margin-top: 15px;
-    padding: 12px;
-    border-radius: 6px;
+    margin-top: 0.75rem;
+    font-size: 12px;
     display: none;
 }
-.decrypt-status.error {
-    background: #3a2020;
-    border: 1px solid #ef4444;
-    color: #fca5a5;
-}
-.decrypt-status.success {
-    background: #1f3a2f;
-    border: 1px solid #10b981;
-    color: #6ee7b7;
-}
-.decrypt-status.info {
-    background: #1e2a3a;
-    border: 1px solid #3b82f6;
-    color: #93c5fd;
-}
-.encrypted-badge {
-    display: inline-block;
-    background: #fbbf24;
-    color: #1a1818;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    margin-left: 10px;
-}
+
+.decrypt-status.error { color: #e53e3e; }
+.decrypt-status.success { color: #48bb78; }
+.decrypt-status.info { color: #888; }
+
 .hidden {
     display: none !important;
 }
+
 #decryptedContent {
-    margin-top: 20px;
+    margin-top: 0;
 }
-.qr-section {
-    margin: 30px auto;
-    padding: 20px;
-    max-width: 400px;
-    background: #2a2828;
-    border: 2px solid #48bb78;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+
+/* download button for binary content */
+.download-btn {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    background: #0d0d0d;
+    color: #48bb78;
+    text-decoration: none;
+    border: 1px solid #333;
+    border-radius: 2px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
+    margin-top: 1rem;
+    transition: border-color 0.2s;
+}
+
+.download-btn:hover {
+    border-color: #48bb78;
+}
+
+/* download bar */
+.download-bar {
+    display: none;
+    background: #111;
+    border-bottom: 1px solid #1a1a1a;
+    padding: 0.5rem 1.5rem;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 12px;
+}
+
+.download-bar.active {
+    display: block;
+}
+
+.download-bar a {
+    color: #48bb78;
+    text-decoration: none;
+    border: 1px solid #2a2a2a;
+    border-radius: 2px;
+    padding: 0.3rem 0.7rem;
+    transition: border-color 0.2s;
+}
+
+.download-bar a:hover {
+    border-color: #48bb78;
+}
+
+/* footer */
+.footer-bar {
+    background: #111;
+    border-top: 1px solid #1a1a1a;
+    color: #333;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 11px;
+    padding: 0.5rem 1.5rem;
     text-align: center;
 }
-#qrcode {
-    display: flex;
-    justify-content: center;
-    margin: 20px 0;
-    padding: 15px;
-    background: white;
-    border-radius: 8px;
-}
+
+.footer-bar a { color: #444; text-decoration: none; }
+.footer-bar a:hover { color: #666; }
 </style>
 </head>
 
 <body>
-<link rel="stylesheet" href="getpost.css">
-  <div id="encryptedNotice" class="hidden">
-      <div class="decrypt-interface">
-          <h2>🔒 Encrypted Content <span class="encrypted-badge">E2E ENCRYPTED</span></h2>
-          <p>This content is end-to-end encrypted. Enter the password to decrypt and view.</p>
-          <div class="decrypt-field">
-              <label for="decryptPassword">Password:</label>
-              <input type="password" id="decryptPassword" placeholder="Enter decryption password" autocomplete="off">
-              <button type="button" class="password-toggle" onclick="toggleDecryptPasswordVisibility()">👁️</button>
-          </div>
-          <button class="decrypt-button" id="decryptButton" onclick="decryptContent()">🔓 Decrypt Content</button>
-          <div class="decrypt-status" id="decryptStatus"></div>
-      </div>
-  </div>
+<div class="top-bar">
+    <a href="/">getpost</a>
+    <span class="expires">expires ${expiryTime}</span>
+</div>
+<div class="download-bar" id="downloadBar"></div>
 
-  <div id="content">
-      <img id="imgContent" src="${imageUrl}"></img>
-  </div>
-  <div id="markdownContent">${contentAsHtmlFromMarked}</div>
-  <div id="decryptedContent" class="hidden"></div>
+<div class="content-wrap">
+    <div id="encryptedNotice" class="hidden">
+        <div class="decrypt-interface">
+            <div class="heading">encrypted content</div>
+            <div class="decrypt-field">
+                <label for="decryptPassword">passphrase:</label>
+                <input type="password" id="decryptPassword" placeholder="enter passphrase" autocomplete="off">
+                <button type="button" class="password-toggle" onclick="toggleDecryptPasswordVisibility()">show</button>
+            </div>
+            <button class="decrypt-button" id="decryptButton" onclick="decryptContent()">decrypt</button>
+            <div class="decrypt-status" id="decryptStatus"></div>
+        </div>
+    </div>
 
-  <div class="qr-section hidden" id="qrSection">
-      <h3>📱 Share with QR Code</h3>
-      <div id="qrcode"></div>
-      <p style="font-size: 13px; color: #64748b;">Scan to share this encrypted link</p>
-  </div>
+    <div id="content">
+        <img id="imgContent" src="${imageUrl}">
+    </div>
+    <div id="markdownContent">${contentAsHtmlFromMarked}</div>
+    <div id="decryptedContent" class="hidden"></div>
+</div>
 
-  <script src="/naclfast.min.js"></script>
-  <script src="/argon2bundled.min.js"></script>
-  <script src="/qrcode.min.js"></script>
-  <script>
-      var payloadType = "${type}";
-      var encodedPayload = "${encodedPayload}";
-      var isEncrypted = false;
-      var encryptedData = null;
-      var originalMimeType = null;
-      var originalFilename = null;
-      const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+<div class="footer-bar">
+    <a href="/">getpost</a> &middot; <a href="/about">about</a>
+</div>
 
-      async function checkIfEncrypted() {
-          try {
-              const rawUrl = window.location.href.split('#')[0] + '&raw';
-              const response = await fetch(rawUrl, {
-                  mode: 'cors',
-                  credentials: 'omit',
-                  referrerPolicy: 'no-referrer',
-                  cache: 'no-cache'
-              });
+<script src="/naclfast.min.js"></script>
+<script src="/argon2bundled.min.js"></script>
+<script src="/marked.min.js"></script>
+<script>
+    var payloadType = "${type}";
+    var encodedPayload = "${encodedPayload}";
+    var isEncrypted = false;
+    var encryptedData = null;
+    var originalMimeType = null;
+    var originalFilename = null;
 
-              if (!response.ok) {
-                  return false;
-              }
+    async function checkIfEncrypted() {
+        try {
+            var rawUrl = window.location.href.split('#')[0] + '&raw';
+            var response = await fetch(rawUrl, {
+                mode: 'cors',
+                credentials: 'omit',
+                referrerPolicy: 'no-referrer',
+                cache: 'no-cache'
+            });
 
-              const arrayBuffer = await response.arrayBuffer();
-              const data = new Uint8Array(arrayBuffer);
+            if (!response.ok) return false;
 
-              if (data.length > 0 && data[0] === 0) {
-                  isEncrypted = true;
-                  encryptedData = data;
-                  showDecryptInterface();
+            var arrayBuffer = await response.arrayBuffer();
+            var data = new Uint8Array(arrayBuffer);
 
-                  const hash = window.location.hash;
-                  if (hash && hash.length > 1) {
-                      const fragment = hash.substring(1);
-                      const parts = fragment.split(';;;');
-                      if (parts.length >= 2 && parts[1]) {
-                          // parts[0] is empty, parts[1] is password, parts[2] is MIME type, parts[3] is filename
-                          document.getElementById('decryptPassword').value = decodeURIComponent(parts[1]);
-                          if (parts.length >= 3 && parts[2]) {
-                              originalMimeType = decodeURIComponent(parts[2]);
-                          }
-                          if (parts.length >= 4 && parts[3]) {
-                              originalFilename = decodeURIComponent(parts[3]);
-                          }
-                          showStatus('Password loaded from URL. Decrypting...', 'info');
-                          setTimeout(() => decryptContent(), 500);
-                          history.replaceState(null, null, window.location.pathname + window.location.search);
-                      }
-                  }
+            if (data.length > 0 && data[0] === 0) {
+                isEncrypted = true;
+                encryptedData = data;
+                showDecryptInterface();
 
-                  generateQRCode();
-                  return true;
-              }
+                var hash = window.location.hash;
+                if (hash && hash.length > 1) {
+                    var fragment = hash.substring(1);
+                    var parts = fragment.split(';;;');
+                    if (parts.length >= 2 && parts[1]) {
+                        document.getElementById('decryptPassword').value = decodeURIComponent(parts[1]);
+                        if (parts.length >= 3 && parts[2]) {
+                            originalMimeType = decodeURIComponent(parts[2]);
+                        }
+                        if (parts.length >= 4 && parts[3]) {
+                            originalFilename = decodeURIComponent(parts[3]);
+                        }
+                        showStatus('passphrase loaded, decrypting...', 'info');
+                        setTimeout(function() { decryptContent(); }, 500);
+                        history.replaceState(null, null, window.location.pathname + window.location.search);
+                    }
+                }
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error checking encryption:', error);
+            return false;
+        }
+    }
 
-              return false;
-          } catch (error) {
-              console.error('Error checking encryption:', error);
-              return false;
-          }
-      }
+    function showDecryptInterface() {
+        document.getElementById('content').classList.add('hidden');
+        document.getElementById('markdownContent').classList.add('hidden');
+        document.getElementById('encryptedNotice').classList.remove('hidden');
+    }
 
-      function showDecryptInterface() {
-          document.getElementById('content').classList.add('hidden');
-          document.getElementById('markdownContent').classList.add('hidden');
-          document.getElementById('encryptedNotice').classList.remove('hidden');
-      }
+    function showStatus(message, type) {
+        var status = document.getElementById('decryptStatus');
+        status.textContent = message;
+        status.className = 'decrypt-status ' + type;
+        status.style.display = 'block';
+    }
 
-      function showStatus(message, type) {
-          const status = document.getElementById('decryptStatus');
-          status.textContent = message;
-          status.className = 'decrypt-status ' + type;
-          status.style.display = 'block';
-      }
+    async function deriveKey(password, salt) {
+        var passwordBytes = new TextEncoder().encode(password);
+        var result = await argon2.hash({
+            pass: passwordBytes,
+            salt: salt,
+            time: 4,
+            mem: 65536,
+            hashLen: 32,
+            parallelism: 1,
+            type: argon2.ArgonType.Argon2id
+        });
+        return new Uint8Array(result.hash);
+    }
 
-      async function deriveKey(password, salt) {
-          const passwordBytes = new TextEncoder().encode(password);
-          const opslimit = 4;
-          const memlimit = 65536;  // 64 MB (in KB)
+    async function decryptContent() {
+        var password = document.getElementById('decryptPassword').value;
 
-          const result = await argon2.hash({
-              pass: passwordBytes,
-              salt: salt,
-              time: opslimit,
-              mem: memlimit,
-              hashLen: 32,
-              parallelism: 1,
-              type: argon2.ArgonType.Argon2id
-          });
+        if (!password) {
+            showStatus('enter a passphrase', 'error');
+            return;
+        }
 
-          return new Uint8Array(result.hash);
-      }
+        if (!encryptedData) {
+            showStatus('no encrypted data available', 'error');
+            return;
+        }
 
-      async function decryptContent() {
-          const password = document.getElementById('decryptPassword').value;
+        try {
+            document.getElementById('decryptButton').disabled = true;
+            showStatus('deriving key (argon2id)...', 'info');
 
-          if (!password) {
-              showStatus('Please enter a password', 'error');
-              return;
-          }
+            if (encryptedData[0] !== 0) {
+                throw new Error('invalid encrypted data format');
+            }
 
-          if (!encryptedData) {
-              showStatus('No encrypted data available', 'error');
-              return;
-          }
+            var salt = encryptedData.slice(1, 17);
+            var nonceAndCiphertext = encryptedData.slice(17);
+            var nonceSize = nacl.secretbox.nonceLength;
 
-          try {
-              document.getElementById('decryptButton').disabled = true;
-              showStatus('Decrypting...', 'info');
+            if (nonceAndCiphertext.length < nonceSize) {
+                throw new Error('invalid encrypted data');
+            }
 
-              if (encryptedData[0] !== 0) {
-                  throw new Error('Invalid encrypted data format');
-              }
+            var nonce = nonceAndCiphertext.slice(0, nonceSize);
+            var ciphertext = nonceAndCiphertext.slice(nonceSize);
 
-              const salt = encryptedData.slice(1, 17);
-              const nonceAndCiphertext = encryptedData.slice(17);
-              const nonceSize = nacl.secretbox.nonceLength;
+            var t0 = performance.now();
+            var key = await deriveKey(password, salt);
+            var keyMs = Math.round(performance.now() - t0);
+            showStatus('key derived in ' + (keyMs / 1000).toFixed(1) + 's, decrypting...', 'info');
 
-              if (nonceAndCiphertext.length < nonceSize) {
-                  throw new Error('Invalid encrypted data');
-              }
+            var decrypted = nacl.secretbox.open(ciphertext, nonce, key);
 
-              const nonce = nonceAndCiphertext.slice(0, nonceSize);
-              const ciphertext = nonceAndCiphertext.slice(nonceSize);
+            if (!decrypted) {
+                throw new Error('incorrect passphrase or corrupted data');
+            }
 
-              const key = await deriveKey(password, salt);
-              const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
+            showStatus('decrypted', 'success');
+            displayDecryptedContent(decrypted);
 
-              if (!decrypted) {
-                  throw new Error('Incorrect password or corrupted data');
-              }
+            setTimeout(function() {
+                document.getElementById('encryptedNotice').classList.add('hidden');
+            }, 800);
 
-              showStatus('✅ Successfully decrypted!', 'success');
+        } catch (error) {
+            console.error('Decryption error:', error);
+            showStatus('failed: ' + error.message, 'error');
+            document.getElementById('decryptButton').disabled = false;
+        }
+    }
 
-              displayDecryptedContent(decrypted);
+    function showDownloadBar(decryptedData) {
+        var mimeType = originalMimeType || 'application/octet-stream';
+        var blob = new Blob([decryptedData], { type: mimeType });
+        var blobUrl = URL.createObjectURL(blob);
+        var filename = originalFilename || 'decrypted-file';
 
-              setTimeout(() => {
-                  document.getElementById('encryptedNotice').classList.add('hidden');
-              }, 1000);
+        var bar = document.getElementById('downloadBar');
+        var link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        link.textContent = 'download ' + filename;
+        bar.innerHTML = '';
+        bar.appendChild(link);
+        bar.classList.add('active');
+    }
 
-          } catch (error) {
-              console.error('Decryption error:', error);
-              showStatus('❌ Decryption failed: ' + error.message, 'error');
-              document.getElementById('decryptButton').disabled = false;
-          }
-      }
+    function displayDecryptedContent(decryptedData) {
+        var decryptedDiv = document.getElementById('decryptedContent');
+        decryptedDiv.classList.remove('hidden');
 
-      function displayDecryptedContent(decryptedData) {
-          const decryptedDiv = document.getElementById('decryptedContent');
-          decryptedDiv.classList.remove('hidden');
+        showDownloadBar(decryptedData);
 
-          const dataString = new TextDecoder('utf-8').decode(decryptedData);
-          // Check if content is printable ASCII (avoid regex issues with template literals)
-          let isPrintable = true;
-          for (let i = 0; i < Math.min(dataString.length, 1000); i++) {
-              const code = dataString.charCodeAt(i);
-              if (code > 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
-                  isPrintable = false;
-                  break;
-              }
-          }
+        var dataString = new TextDecoder('utf-8').decode(decryptedData);
+        var isPrintable = true;
+        for (var i = 0; i < Math.min(dataString.length, 1000); i++) {
+            var code = dataString.charCodeAt(i);
+            if (code > 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
+                isPrintable = false;
+                break;
+            }
+        }
 
-          if (isPrintable) {
-              try {
-                  if (typeof marked !== 'undefined') {
-                      decryptedDiv.innerHTML = marked(dataString);
-                  } else {
-                      decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
-                          dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
-                  }
-              } catch (e) {
-                  decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
-                      dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
-              }
-          } else {
-              // Binary content - create blob with original MIME type if available
-              const mimeType = originalMimeType || 'application/octet-stream';
-              const blob = new Blob([decryptedData], { type: mimeType });
-              const url = URL.createObjectURL(blob);
+        if (isPrintable) {
+            try {
+                if (typeof marked !== 'undefined') {
+                    decryptedDiv.innerHTML = marked(dataString);
+                } else {
+                    decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
+                        dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
+                }
+            } catch (e) {
+                decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
+                    dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
+            }
+        } else {
+            var mimeType = originalMimeType || 'application/octet-stream';
+            var blob = new Blob([decryptedData], { type: mimeType });
+            var blobUrl = URL.createObjectURL(blob);
 
-              // Determine if we should try to display inline
-              const canDisplayInline = mimeType.startsWith('image/') ||
-                                       mimeType.startsWith('video/') ||
-                                       mimeType.startsWith('audio/') ||
-                                       mimeType === 'application/pdf';
+            var canDisplayInline = mimeType.startsWith('image/') ||
+                                   mimeType.startsWith('video/') ||
+                                   mimeType.startsWith('audio/') ||
+                                   mimeType === 'application/pdf';
 
-              if (canDisplayInline) {
-                  // Try to display inline
-                  if (mimeType.startsWith('image/')) {
-                      decryptedDiv.innerHTML = '<img src="' + url + '" style="max-width: 100%; height: auto; border-radius: 8px; margin-top: 20px;">';
-                  } else if (mimeType.startsWith('video/')) {
-                      decryptedDiv.innerHTML = '<video controls style="max-width: 100%; margin-top: 20px;"><source src="' + url + '" type="' + mimeType + '"></video>';
-                  } else if (mimeType.startsWith('audio/')) {
-                      decryptedDiv.innerHTML = '<audio controls style="width: 100%; margin-top: 20px;"><source src="' + url + '" type="' + mimeType + '"></audio>';
-                  } else if (mimeType === 'application/pdf') {
-                      decryptedDiv.innerHTML = '<iframe src="' + url + '" style="width: 100%; height: 600px; border: none; margin-top: 20px;"></iframe>';
-                  }
-              } else {
-                  decryptedDiv.innerHTML = '<p>Binary content decrypted successfully.</p>';
-              }
+            if (canDisplayInline) {
+                if (mimeType.startsWith('image/')) {
+                    decryptedDiv.innerHTML = '<img src="' + blobUrl + '" style="max-width: 100%; height: auto;">';
+                } else if (mimeType.startsWith('video/')) {
+                    decryptedDiv.innerHTML = '<video controls style="max-width: 100%;"><source src="' + blobUrl + '" type="' + mimeType + '"></video>';
+                } else if (mimeType.startsWith('audio/')) {
+                    decryptedDiv.innerHTML = '<audio controls style="width: 100%;"><source src="' + blobUrl + '" type="' + mimeType + '"></audio>';
+                } else if (mimeType === 'application/pdf') {
+                    decryptedDiv.innerHTML = '<iframe src="' + blobUrl + '" style="width: 100%; height: 600px; border: none;"></iframe>';
+                }
+            } else {
+                decryptedDiv.innerHTML = '<p>Binary content decrypted.</p>';
+            }
+        }
+    }
 
-              // Always add download button
-              const downloadBtn = document.createElement('a');
-              downloadBtn.href = url;
-              downloadBtn.download = originalFilename || 'decrypted-file';
-              downloadBtn.textContent = '📥 Download ' + (originalFilename || 'Decrypted File');
-              downloadBtn.style.cssText = 'display: inline-block; padding: 12px 24px; background: #10b981; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; margin-top: 20px;';
-              decryptedDiv.appendChild(downloadBtn);
-          }
-      }
+    function toggleDecryptPasswordVisibility() {
+        var input = document.getElementById('decryptPassword');
+        var button = document.querySelector('.decrypt-field .password-toggle');
+        if (input.type === 'password') {
+            input.type = 'text';
+            button.textContent = 'hide';
+        } else {
+            input.type = 'password';
+            button.textContent = 'show';
+        }
+    }
 
-      function generateQRCode() {
-          // Check if we have an encrypted URL with password in fragment
-          const hash = window.location.hash;
-          if (!hash || hash.indexOf(';;;') === -1) {
-              return;
-          }
+    var decryptInput = document.getElementById('decryptPassword');
+    if (decryptInput) {
+        decryptInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') decryptContent();
+        });
+    }
 
-          const qrSection = document.getElementById('qrSection');
-          const qrcodeDiv = document.getElementById('qrcode');
+    window.addEventListener('load', async function() {
+        if (typeof nacl === 'undefined' || typeof argon2 === 'undefined') {
+            console.error('Crypto libraries failed to load');
+            showStatus('failed to load encryption libraries — refresh the page', 'error');
+            return;
+        }
 
-          if (!qrSection || !qrcodeDiv) return;
+        try {
+            await checkIfEncrypted();
+        } catch (error) {
+            console.error('Failed to initialize encryption:', error);
+            showStatus('failed to initialize decryption — refresh the page', 'error');
+        }
+    });
 
-          try {
-              qrcodeDiv.innerHTML = '';
-              // Generate QR code with full URL including fragment
-              const fullUrl = window.location.href;
-              new QRCode(qrcodeDiv, {
-                  text: fullUrl,
-                  width: 200,
-                  height: 200,
-                  colorDark: "#000000",
-                  colorLight: "#ffffff",
-                  correctLevel: QRCode.CorrectLevel.M
-              });
-              qrSection.classList.remove('hidden');
-          } catch (e) {
-              console.error('QR code generation failed:', e);
-          }
-      }
-
-      function toggleDecryptPasswordVisibility() {
-          const input = document.getElementById('decryptPassword');
-          const button = document.querySelector('.decrypt-field .password-toggle');
-          if (input.type === 'password') {
-              input.type = 'text';
-              button.textContent = '🙈';
-          } else {
-              input.type = 'password';
-              button.textContent = '👁️';
-          }
-      }
-
-      document.getElementById('decryptPassword')?.addEventListener('keypress', function(e) {
-          if (e.key === 'Enter') {
-              decryptContent();
-          }
-      });
-
-      window.addEventListener('load', async function() {
-          // Verify crypto libraries loaded before checking encryption
-          if (typeof nacl === 'undefined' || typeof argon2 === 'undefined') {
-              console.error('Crypto libraries failed to load');
-              showStatus('Failed to load encryption libraries. Please refresh the page.', 'error');
-              return;
-          }
-
-          try {
-              await checkIfEncrypted();
-          } catch (error) {
-              console.error('Failed to initialize encryption:', error);
-              showStatus('Failed to initialize decryption. Please refresh the page.', 'error');
-          }
-      });
-
-      ${injectorScript};
-  </script>
+    ${injectorScript};
+</script>
 </body>
-
-<hr>
-<blockquote>
-  <p><strong>Powered by <a href="/">GetPost</a></strong> |
-     <a href="https://github.com/getpost-loves-you/getpost">📄 Source</a> |
-     <a href="https://github.com/getpost-loves-you/getpost/blob/main/SETUP.md">🚀 Deploy Your Own</a> |
-     Expires: ${expiryTime}</p>
-</blockquote>
 </html>
