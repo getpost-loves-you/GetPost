@@ -174,35 +174,23 @@ expires at: ${responseData.expires_at}`;
         // ULID is len26
         if (key.length === 26 || key.length === 91) {
           let {
-            contentFromKeyAsArrayBuffer,
+            value: contentFromKeyAsArrayBuffer,
             metadata
           } =
           await NAMESPACE.getWithMetadata(key, "arrayBuffer");
-          // if either key dne, or old format
-          if (metadata === null) {
-            // check to see if old (pre-metadata)
-            contentFromKeyAsArrayBuffer = await NAMESPACE.get(
-              key,
-              "arrayBuffer",
+          if (contentFromKeyAsArrayBuffer === null) {
+            return buildResponse(
+              "Sorry, invalid key!",
+              DEFAULT_MIME_TEXT, {},
+              404,
+              url,
             );
-            if (contentFromKeyAsArrayBuffer !== null) {
-              contentFromKeyAsArrayBuffer = contentFromKeyAsArrayBuffer.slice(
-                0,
-                -26,
-              );
-            } else {
-              return buildResponse(
-                "Sorry, invalid key!",
-                DEFAULT_MIME_TEXT, {},
-                404,
-                url,
-              );
-            }
-          } else {
-            // this second get should not be required... it appears getWithMetadata doesn't support returning arrayBuffers!?
-            contentFromKeyAsArrayBuffer = await NAMESPACE.get(
-              key,
-              "arrayBuffer",
+          }
+          // old format (pre-metadata) appended the 26-char delete key to the content
+          if (metadata === null) {
+            contentFromKeyAsArrayBuffer = contentFromKeyAsArrayBuffer.slice(
+              0,
+              -26,
             );
           }
           // if both key and delete key...
