@@ -4,7 +4,6 @@
 
 """
 
-from os import supports_effective_ids
 import sys, re, glob, os.path
 
 # this was setup for use with docopt-ng... but not much value
@@ -35,18 +34,15 @@ base64_include_suffix = b") format('woff2')"
 def read_file_from_deps(file_name):
     return open(f"./deps/{file_name.decode()}", "rb").read()
 
-def escape_pattern(input_pattern):
-    return input_pattern.replace(b"(", b"\(").replace(b")", b"\)")
-
 # find all AUTOINSERT tagged fragments using a regular expression matching string-interpolated javascript
-for fragment in re.findall(b"\`AUTOINSERT\w+\`", INPUT_JS):
+for fragment in re.findall(rb"`AUTOINSERT\w+`", INPUT_JS):
     file_name = (
         fragment.strip(b"`").replace(b"__", b".").replace(b"AUTOINSERT_", b"").lower()
     )
     print("loading:", file_name.decode())
     file_substitution = read_file_from_deps(file_name)
     # include base64 strings from files in CSS
-    if re.match(b".+\.css", file_name):
+    if re.match(rb".+\.css", file_name):
         """
         css base64 include syntax:
 
@@ -55,11 +51,9 @@ for fragment in re.findall(b"\`AUTOINSERT\w+\`", INPUT_JS):
         where <BASE64STRING> is a valid base64 encoding of a .woff2 font file
         """
         for base64_include in re.findall(
-            escape_pattern(
-                base64_include_prefix
-                    + b".+"
-                    + base64_include_suffix
-            ),
+            re.escape(base64_include_prefix)
+                + b".+"
+                + re.escape(base64_include_suffix),
             file_substitution
         ):
             base64_file = (
@@ -88,7 +82,7 @@ where module-name:
 
 """
 
-for import_ in re.findall(b"import\ '\w+'", INPUT_JS):
+for import_ in re.findall(rb"import '\w+'", INPUT_JS):
     file_fragment = (
         import_.replace(b"import '", b"").replace(b".js", b"")[0:-1]
     ).decode("utf-8")
