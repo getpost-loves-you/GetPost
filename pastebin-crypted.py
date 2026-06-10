@@ -35,7 +35,7 @@ class PastebinCrypter:
 
     ARGON2_VARIANT = nacl.pwhash.argon2id
     SALT_SIZE = 16
-    ENCRYPTED_MARKER = b'\x00'
+    ENCRYPTED_MARKER = b'\x00GPE1'
 
     # Curated wordlist for password generation - evocative and memorable (from deps/wordlist.txt)
     WORDLIST = [
@@ -174,8 +174,8 @@ def detect_mime_type(content: bytes) -> str:
     # Get first 4 bytes as hex string for comparison
     header = content[:4].hex()
 
-    # Check for encrypted content (first byte is 0x00)
-    if len(content) > 0 and content[0] == 0:
+    # Check for encrypted container (0x00 "GPE1" magic)
+    if content[:5] == b'\x00GPE1':
         return 'application/x-encrypted'
 
     # Match file signatures (following worker.js logic)

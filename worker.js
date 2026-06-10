@@ -485,8 +485,13 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   }
   const contentAsUint8Array = new Uint8Array(content);
 
-  // Check if content is encrypted (first byte is 0x00)
-  const isEncrypted = contentAsUint8Array.length > 0 && contentAsUint8Array[0] === 0;
+  // encrypted container: 0x00 "GPE1" + salt + nonce + ciphertext
+  const isEncryptedNew = hex(contentAsUint8Array.slice(0, 5)) === "0047504531";
+  // legacy uploads used a bare 0x00 marker, which collides with mp4 and other
+  // zero-leading binaries - only assume legacy-encrypted when it isn't an mp42 container
+  const isEncrypted = isEncryptedNew ||
+    (contentAsUint8Array.length > 0 && contentAsUint8Array[0] === 0 &&
+      hex(contentAsUint8Array.slice(4, 12)) !== "667479706d703432");
 
   const contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
   // checks to see if characters are all plausibly utf-8 / printable
