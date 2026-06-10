@@ -119,14 +119,16 @@ Perfect for a pastebin! Popular content gets cached globally, while the free tie
 GetPost prioritizes **simplicity over complexity** in its security approach:
 
 **What's Protected:**
+- 🔐 **End-to-end encryption** - Web uploads are encrypted in-browser (NaCl SecretBox + Argon2id); the server never sees plaintext or passphrases
 - 🔐 **Access control** - 80 bits of entropy in ULIDs (stronger than most passwords)
 - 🔒 **Data at rest** - AES-256 encryption by Cloudflare
 - 🌐 **Data in transit** - TLS encryption for all requests
 - 🚫 **No tracking** - No cookies, analytics, or third-party scripts
 
 **What's Not Protected:**
-- Content is theoretically accessible to Cloudflare employees, [with some difficulty](https://developers.cloudflare.com/kv/reference/data-security/)
-- No client-side encryption (by design, for simplicity)
+- CLI uploads (`curl`) are stored unencrypted unless you encrypt first (use `pastebin-crypted.py`)
+- Encrypted content is theoretically accessible to Cloudflare employees, [with some difficulty](https://developers.cloudflare.com/kv/reference/data-security/) - but only as ciphertext
+- Share links embed the passphrase in the URL fragment: anyone with the link can decrypt
 - Your computer.
 
 **Privacy Philosophy:**
@@ -161,17 +163,19 @@ Be excellent to one another, and follow the instructions in SETUP.md to create y
 ### Project Structure
 ```
 getpost/
-├── worker.js          # Main Cloudflare Worker code
-├── autoinsert.py      # Build script (embeds deps/ into worker)
-├── deploy.sh          # Deployment automation
-├── test.sh            # End-to-end testing
-├── SETUP.md           # Detailed deployment guide
-├── deps/              # Static assets
-│   ├── getpost.css    # Styling
-│   ├── getpost.html   # Content template
-│   ├── upload.html    # Upload page
-│   └── marked.min.js  # Markdown parser
-└── .staging           # Shared staging credentials
+├── worker.js            # Main Cloudflare Worker code
+├── autoinsert.py        # Build script (embeds deps/ into worker)
+├── deploy.sh            # Deployment automation
+├── test.sh              # End-to-end testing
+├── pastebin-crypted.py  # E2E encrypted CLI uploader
+├── SETUP.md             # Detailed deployment guide
+├── deps/                # Static assets (embedded at build time)
+│   ├── upload.html      # Upload page (encrypts in-browser)
+│   ├── getpost.html     # Content viewer (decrypts in-browser)
+│   ├── about.html       # About page
+│   ├── marked.min.js    # Markdown parser
+│   └── *.base64         # NaCl, Argon2, QR code libraries
+└── .staging             # Shared staging credentials + test hashes
 ```
 
 ### Testing
@@ -183,7 +187,7 @@ getpost/
 ./test.sh mydomain
 
 # Generate new baseline hashes after changes
-./generate_test_hashes.sh staging
+./.generate_test_hashes.sh staging
 ```
 
 ### Customization Ideas
@@ -199,9 +203,9 @@ getpost/
 ```bash
 POST /post
 Content-Type: application/octet-stream
-X-TTL: 3600  # Optional: expiry in seconds
+X-TTL: 3600  # Optional: expiry in seconds (min 60, default 1 year)
 
-# Response includes share link and delete key
+# Max 10MB; response includes share link and delete key
 ```
 
 ### Retrieve
