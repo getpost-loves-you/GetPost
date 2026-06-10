@@ -1,5 +1,9 @@
 #!/bin/bash
 set -e
+if [ -z "$1" ] || [ ! -f ".$1" ]; then
+    echo "Usage: $0 <deployment_name>   (expects a ./.<deployment_name> config file)"
+    exit 1
+fi
 CONFIG_FILE=.$1
 source "$CONFIG_FILE"
 echo "✓ Configuration loaded from $CONFIG_FILE"
