@@ -73,6 +73,10 @@ async function HANDLER(fetch_event) {
 
     if (url.pathname === "/post" || url.pathname === "/") {
       if (request.method === "POST") {
+        // deletion is a POST so link-preview crawlers fetching a delete URL can't destroy content
+        if (url.searchParams.has("key") && url.searchParams.has("del")) {
+          return await deletePost(url);
+        }
         // Accept any reasonable content for uploads
         let blob = await request.arrayBuffer();
         blob = await new Blob([blob]).arrayBuffer();
@@ -119,14 +123,9 @@ async function HANDLER(fetch_event) {
 
         // Content negotiation based on Accept header with user-agent fallback
         const acceptHeader = requestHeadersAndFriends["accept"] || "";
-        const userAgent = requestHeadersAndFriends["user-agent"] || "";
 
         // Check for CLI tools as fallback when Accept header is generic
-        const isCLITool = userAgent.startsWith("curl/") ||
-          userAgent.toLowerCase().includes("wget") ||
-          userAgent.toLowerCase().includes("python") ||
-          userAgent.toLowerCase().includes("node") ||
-          userAgent.toLowerCase().includes("go-http-client");
+        const isCLITool = isCliRequest(requestHeadersAndFriends);
 
         if (acceptHeader.includes("application/json")) {
           // JSON response for API clients
@@ -160,7 +159,6 @@ expires at: ${responseData.expires_at}`;
           return buildResponse(htmlResp, DEFAULT_MIME_HTML, {}, 200, url);
         }
       } else if (request.method === "GET") {
-        const del = url.searchParams.get("del");
         const key = url.searchParams.get("key");
         const raw = url.searchParams.has("raw");
         const customContentType = url.searchParams.get("content_type");
@@ -170,6 +168,10 @@ expires at: ${responseData.expires_at}`;
         if (!url.searchParams.has("key")) {
           const upload = `AUTOINSERT_UPLOAD__HTML`; // eslint-disable-line
           return buildResponse(upload, DEFAULT_MIME_HTML, {}, 200, url);
+        }
+        // deleting requires a POST (so link-preview crawlers can't trigger it) - GET shows a confirmation
+        if (url.searchParams.has("del")) {
+          return buildDeleteConfirmation(url, requestHeadersAndFriends);
         }
         // ULID is len26
         if (key.length === 26 || key.length === 91) {
@@ -192,25 +194,6 @@ expires at: ${responseData.expires_at}`;
               0,
               -26,
             );
-          }
-          // if both key and delete key...
-          if (url.searchParams.has("del") && del.length == 26) {
-            if (del === metadata.del) {
-              const deleted_target_key = await NAMESPACE.delete(key);
-              return buildResponse(
-                `OK, sent command to delete ${key} using ${del} - please wait 3min for full delete.`,
-                DEFAULT_MIME_TEXT, {},
-                200,
-                url,
-              );
-            } else {
-              return buildResponse(
-                "Sorry, invalid del key!",
-                DEFAULT_MIME_TEXT, {},
-                404,
-                url,
-              );
-            }
           }
           const [generatedBodyHtml, type] = generateHtmlBasedOnType(
             contentFromKeyAsArrayBuffer,
@@ -360,6 +343,81 @@ function isValidContentType(contentType) {
   }
 
   return true;
+}
+
+// detect CLI tools (curl/wget/etc) for content negotiation when Accept is generic
+function isCliRequest(requestHeadersAndFriends) {
+  const userAgent = requestHeadersAndFriends["user-agent"] || "";
+  return userAgent.startsWith("curl/") ||
+    userAgent.toLowerCase().includes("wget") ||
+    userAgent.toLowerCase().includes("python") ||
+    userAgent.toLowerCase().includes("node") ||
+    userAgent.toLowerCase().includes("go-http-client");
+}
+
+// validate a delete key against stored metadata (or the legacy appended key) and delete the post
+async function deletePost(url) {
+  const key = url.searchParams.get("key");
+  const del = url.searchParams.get("del");
+  if (!key || (key.length !== 26 && key.length !== 91)) {
+    return buildResponse("Sorry, invalid key!", DEFAULT_MIME_TEXT, {}, 404, url);
+  }
+  const {
+    value,
+    metadata
+  } = await NAMESPACE.getWithMetadata(key, "arrayBuffer");
+  if (value === null) {
+    return buildResponse("Sorry, invalid key!", DEFAULT_MIME_TEXT, {}, 404, url);
+  }
+  // old format (pre-metadata) appended the 26-char delete key to the content
+  const storedDel = metadata !== null ?
+    metadata.del :
+    new TextDecoder("utf-8").decode(new Uint8Array(value.slice(-26)));
+  if (del && del.length === 26 && del === storedDel) {
+    await NAMESPACE.delete(key);
+    return buildResponse(
+      `OK, sent command to delete ${key} - please wait 3min for full delete.`,
+      DEFAULT_MIME_TEXT, {},
+      200,
+      url,
+    );
+  }
+  return buildResponse("Sorry, invalid del key!", DEFAULT_MIME_TEXT, {}, 404, url);
+}
+
+// GET on a delete link returns instructions (CLI) or a confirmation page (browser) that POSTs back
+function buildDeleteConfirmation(url, requestHeadersAndFriends) {
+  if (isCliRequest(requestHeadersAndFriends)) {
+    return buildResponse(
+      `Deleting requires a POST:\n\n  curl -X POST "${url.href}"\n`,
+      DEFAULT_MIME_TEXT, {},
+      200,
+      url,
+    );
+  }
+  const confirmPage = `<html><head><title>GetPost - delete</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { background: #0d0d0d; color: #b0b0b0; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 14px; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.box { border: 1px solid #2a2a2a; border-radius: 4px; padding: 2rem; max-width: 420px; }
+.box .heading { color: #888; margin-bottom: 1.25rem; }
+button { width: 100%; padding: 0.5rem; background: none; color: #e53e3e; border: 1px solid #e53e3e; border-radius: 2px; font-family: inherit; font-size: 13px; cursor: pointer; }
+button:hover { background: rgba(229, 62, 62, 0.1); }
+#result { margin-top: 0.75rem; font-size: 12px; color: #888; word-break: break-all; }
+</style></head><body>
+<div class="box">
+  <div class="heading">delete this post?</div>
+  <button onclick="doDelete()">delete permanently</button>
+  <div id="result"></div>
+</div>
+<script>
+async function doDelete() {
+  var r = await fetch(window.location.pathname + window.location.search, { method: "POST" });
+  document.getElementById("result").textContent = await r.text();
+}
+</script>
+</body></html>`;
+  return buildResponse(confirmPage, DEFAULT_MIME_HTML, {}, 200, url);
 }
 
 // Handle CORS preflight requests
