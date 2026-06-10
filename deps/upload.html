@@ -452,11 +452,12 @@ async function doUpload() {
         var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
         var ciphertext = nacl.secretbox(message, nonce, key);
 
-        var output = new Uint8Array(1 + salt.length + nonce.length + ciphertext.length);
-        output[0] = 0;
-        output.set(salt, 1);
-        output.set(nonce, 1 + salt.length);
-        output.set(ciphertext, 1 + salt.length + nonce.length);
+        var magic = [0, 0x47, 0x50, 0x45, 0x31]; // 0x00 "GPE1"
+        var output = new Uint8Array(magic.length + salt.length + nonce.length + ciphertext.length);
+        output.set(magic, 0);
+        output.set(salt, magic.length);
+        output.set(nonce, magic.length + salt.length);
+        output.set(ciphertext, magic.length + salt.length + nonce.length);
 
         setStatus('<span class="spinner">|</span> uploading (' + formatSize(output.length) + ')...');
 
