@@ -358,6 +358,12 @@ function showFile(f) {
     document.getElementById('statusLine').innerHTML = '';
     document.getElementById('statusLine').className = 'line status-line';
 
+    if (f.size > 10 * 1024 * 1024) {
+        setStatus('error: file exceeds the 10MB limit', 'err');
+        document.getElementById('passwordSection').classList.remove('active');
+        return;
+    }
+
     var pw = document.getElementById('passwordSection');
     pw.classList.add('active');
     if (!document.getElementById('passphrase').value) {
