@@ -43,6 +43,25 @@ else
     image_embed_sha256=$(curl -s --data-binary @deps/notpacman.png $DEPLOY_URL | grep share\ link | awk '{print $3}' | sed -e's/\&raw//g' | xargs curl -s | sed $NO_ULID | sed $NO_EXPIRY | sed $NO_URL | bare_sha256sum)
 fi
 
+# Test 4: encrypted round trip - upload via pastebin-crypted.py, fetch raw, decrypt locally
+if python3 -c "import nacl" 2>/dev/null; then
+    enc_share_url=$(echo -n "round trip test" | PASTEBIN="$DEPLOY_URL" PASTEBIN_PASSWORD="test-passphrase" ./pastebin-crypted.py 2>/dev/null | tail -n1)
+    enc_raw_url="$(echo "$enc_share_url" | sed 's/#.*//')&raw"
+    encrypted_decrypted=$(curl -s "$enc_raw_url" | python3 -c '
+import sys
+import nacl.secret, nacl.pwhash
+data = sys.stdin.buffer.read()
+header = 5 if data[:5] == b"\x00GPE1" else 1
+salt = data[header:header+16]
+nonce = data[header+16:header+40]
+ct = data[header+40:]
+key = nacl.pwhash.argon2id.kdf(32, b"test-passphrase", salt, opslimit=4, memlimit=67108864)
+sys.stdout.write(nacl.secret.SecretBox(key).decrypt(ct, nonce).decode())
+' 2>/dev/null)
+else
+    encrypted_decrypted="SKIPPED"
+fi
+
 # Results
 echo ""
 echo "=================================="
@@ -84,8 +103,19 @@ else
     echo "  Got:      $upload_sha256"
 fi
 
+# Encrypted round-trip test
+if [ "$encrypted_decrypted" = "SKIPPED" ]; then
+    echo "ENCRYPTED: SKIPPED (PyNaCl not installed)"
+elif [ "$encrypted_decrypted" = "round trip test" ]; then
+    echo "ENCRYPTED: ✅ PASS"
+else
+    echo "ENCRYPTED: ❌ FAIL"
+    echo "  Expected: round trip test"
+    echo "  Got:      $encrypted_decrypted"
+fi
+
 # Overall result
-if [ "${rendered_good:-}" = "$rendered_sha256" ] && [ "${upload_good:-}" = "$upload_sha256" ] && ([ "${image_good:-}" = "$image_embed_sha256" ] || [ "$image_embed_sha256" = "SKIPPED" ]); then
+if [ "${rendered_good:-}" = "$rendered_sha256" ] && [ "${upload_good:-}" = "$upload_sha256" ] && ([ "${image_good:-}" = "$image_embed_sha256" ] || [ "$image_embed_sha256" = "SKIPPED" ]) && ([ "$encrypted_decrypted" = "round trip test" ] || [ "$encrypted_decrypted" = "SKIPPED" ]); then
     echo ""
     echo "🎉 ALL TESTS PASSED!"
     exit 0
