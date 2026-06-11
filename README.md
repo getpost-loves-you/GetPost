@@ -185,10 +185,9 @@ getpost/
 
 # Test your own deployment
 ./test.sh mydomain
-
-# Generate new baseline hashes after changes
-./.generate_test_hashes.sh staging
 ```
+
+The suite uploads small probes against the live deployment and asserts behavior end to end: content negotiation, raw round trips, MIME detection, the encrypted round trip, the delete flow, error/limit handling, CORS, and asset caching. It needs `curl`, `jq`, and `python3`; the encryption tests skip gracefully without PyNaCl.
 
 ### Customization Ideas
 - **Custom CSS themes** - Edit `deps/getpost.css`
