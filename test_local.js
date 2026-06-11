@@ -462,8 +462,16 @@ async function test(name, fn) {
   await test("worker error path returns traceback json", async () => {
     const resp = await call("GET", "/raise_exception");
     assert.strictEqual(resp.status, 500);
+    assert.ok(resp.headers.get("content-type").includes("application/json"));
     const json = await resp.json();
     assert.ok(Array.isArray(json.traceback));
+  });
+
+  await test("error responses do not stuff the body into statusText", async () => {
+    const resp = await call("GET", "/post?key=tooshort");
+    assert.strictEqual(resp.status, 404);
+    // statusText should be the default reason phrase, not the body text
+    assert.ok(!resp.statusText.includes("Sorry"));
   });
 
   console.log("");
