@@ -312,6 +312,10 @@ expires at: ${responseData.expires_at}`;
     } else if (url.pathname === "/marked.min.js") {
       // return Marked markdown parser (base64 decoded)
       return buildResponse(str2ab(atob(marked_base64)), "application/javascript", CACHE_STATIC, 200, url);
+    } else if (url.pathname === "/pastebin-crypted.py") {
+      // each instance serves its own E2E encrypted CLI client
+      const pastebin_crypted = `AUTOINSERT_PASTEBIN_CRYPTED__PY`; // eslint-disable-line
+      return buildResponse(pastebin_crypted, "text/plain; charset=UTF-8", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/about") {
       // return about/docs page
       const about_page = `AUTOINSERT_ABOUT__HTML`; // eslint-disable-line
