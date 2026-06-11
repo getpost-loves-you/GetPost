@@ -36,6 +36,14 @@ const ENCODING_LEN = ENCODING.length;
 const TIME_LEN = 10;
 const RANDOM_LEN = 16;
 
+// embedded libraries only change on deploy; content can linger as long as delete propagation (~3min)
+const CACHE_STATIC = {
+  "Cache-Control": "public, max-age=86400"
+};
+const CACHE_CONTENT = {
+  "Cache-Control": "public, max-age=300"
+};
+
 addEventListener("fetch", (fetch_event) => {
   // configure primary entrypoint
   fetch_event.respondWith(HANDLER(fetch_event));
@@ -64,17 +72,9 @@ async function HANDLER(fetch_event) {
     return handleCorsPreflightRequest(url);
   }
 
-  // Clone the request to avoid "body already used" errors in error handling
+  // first bytes of the request body, captured wherever the body is actually read -
+  // used by /headers and the error handler without buffering every upload twice
   let requestBodyForDebug = null;
-  try {
-    if (request.body) {
-      const clonedRequest = request.clone();
-      requestBodyForDebug = await clonedRequest.arrayBuffer();
-    }
-  } catch (e) {
-    // If cloning fails, we'll just not have debug info
-    requestBodyForDebug = new ArrayBuffer(0);
-  }
 
   // wrap main handler in a try/catch exception logging & reporting block, for easy debug
   try {
@@ -82,9 +82,23 @@ async function HANDLER(fetch_event) {
 
     if (url.pathname === "/post" || url.pathname === "/") {
       if (request.method === "POST") {
+        // deletion is a POST so link-preview crawlers fetching a delete URL can't destroy content
+        if (url.searchParams.has("key") && url.searchParams.has("del")) {
+          return await deletePost(url);
+        }
         // Accept any reasonable content for uploads
-        let blob = await request.arrayBuffer();
-        blob = await new Blob([blob]).arrayBuffer();
+        const blob = await request.arrayBuffer();
+        requestBodyForDebug = blob.slice(0, 20);
+
+        // advertised limit is 10MB (plus slack for the encryption container overhead)
+        if (blob.byteLength > 10 * 1024 * 1024 + 4096) {
+          return buildResponse(
+            "Sorry, content exceeds the 10MB limit!",
+            DEFAULT_MIME_TEXT, {},
+            413,
+            url,
+          );
+        }
 
         // Generate keys
         const storeKey = ulid(now);
@@ -94,12 +108,14 @@ async function HANDLER(fetch_event) {
         // Handle TTL
         let xTtlSeconds = requestHeadersAndFriends["x-ttl"];
         if (xTtlSeconds === undefined) {
-          xTtlSeconds = 24 * 60 * 60 * 30 * 12; // 1 year
+          xTtlSeconds = 365 * 24 * 60 * 60; // 1 year
         } else {
           xTtlSeconds = parseInt(xTtlSeconds, 10);
           // Validate parsed value - must be a positive number
           if (isNaN(xTtlSeconds) || xTtlSeconds <= 0) {
-            xTtlSeconds = 24 * 60 * 60 * 30 * 12; // default to 1 year
+            xTtlSeconds = 365 * 24 * 60 * 60; // default to 1 year
+          } else if (xTtlSeconds < 60) {
+            xTtlSeconds = 60; // KV rejects expirationTtl below 60 seconds
           }
         }
 
@@ -128,14 +144,9 @@ async function HANDLER(fetch_event) {
 
         // Content negotiation based on Accept header with user-agent fallback
         const acceptHeader = requestHeadersAndFriends["accept"] || "";
-        const userAgent = requestHeadersAndFriends["user-agent"] || "";
 
         // Check for CLI tools as fallback when Accept header is generic
-        const isCLITool = userAgent.startsWith("curl/") ||
-          userAgent.toLowerCase().includes("wget") ||
-          userAgent.toLowerCase().includes("python") ||
-          userAgent.toLowerCase().includes("node") ||
-          userAgent.toLowerCase().includes("go-http-client");
+        const isCLITool = isCliRequest(requestHeadersAndFriends);
 
         if (acceptHeader.includes("application/json")) {
           // JSON response for API clients
@@ -168,8 +179,8 @@ expires at: ${responseData.expires_at}`;
 **Expires at:** ${responseData.expires_at}`);
           return buildResponse(htmlResp, DEFAULT_MIME_HTML, {}, 200, url);
         }
-      } else if (request.method === "GET") {
-        const del = url.searchParams.get("del");
+      } else if (request.method === "GET" || request.method === "HEAD") {
+        // the runtime strips the body from HEAD responses, so HEAD can share the GET path
         const key = url.searchParams.get("key");
         const raw = url.searchParams.has("raw");
         const customContentType = url.searchParams.get("content_type");
@@ -251,6 +262,35 @@ body {
     color: #555;
     font-size: 13px;
 }
+
+.drop-zone p a {
+    color: #48bb78;
+    text-decoration: none;
+}
+
+.drop-zone p a:hover { text-decoration: underline; }
+
+.drop-zone.text-mode {
+    cursor: text;
+    align-items: stretch;
+    justify-content: flex-start;
+}
+
+#textInput {
+    display: none;
+    flex: 1;
+    width: 100%;
+    background: none;
+    border: none;
+    outline: none;
+    resize: none;
+    color: #b0b0b0;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 1rem;
+}
+
+#textInput.active { display: block; }
 
 .file-meta {
     display: none;
@@ -429,6 +469,16 @@ body {
     margin-top: 0.3rem;
 }
 
+.delete-url {
+    font-size: 11px;
+    color: #555;
+    word-break: break-all;
+    margin-top: 0.6rem;
+}
+
+.delete-url a { color: #777; text-decoration: none; }
+.delete-url a:hover { color: #e53e3e; }
+
 .bottom {
     display: flex;
     justify-content: space-between;
@@ -452,14 +502,15 @@ input[type="file"] { display: none; }
 
 <div class="prompt">$ upload <span class="cursor"></span></div>
 
-<div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-    <p id="dropHint">drop file here or click to select</p>
+<div class="drop-zone" id="dropZone" onclick="dropZoneClick()">
+    <p id="dropHint">drop file here, click to select, or <a href="#" id="pasteToggle">paste text</a></p>
     <div class="file-meta" id="fileMeta">
         <div class="line">name: <span class="val" id="metaName"></span></div>
         <div class="line">type: <span class="val" id="metaType"></span></div>
         <div class="line">size: <span class="val" id="metaSize"></span></div>
-        <div class="line status-line" id="statusLine"></div>
     </div>
+    <textarea id="textInput" placeholder="type or paste text here" spellcheck="false"></textarea>
+    <div class="line status-line" id="statusLine"></div>
 </div>
 
 <div class="password-section" id="passwordSection">
@@ -485,11 +536,12 @@ input[type="file"] { display: none; }
     <div id="qrcode"></div>
     <div class="share-url" id="shareUrl" onclick="copyShareUrl()"></div>
     <div class="copy-hint" id="copyHint">click to copy</div>
+    <div class="delete-url" id="deleteUrl"></div>
 </div>
 
 <div class="bottom">
-    <span>e2e encrypted</span>
-    <span>curl --data-binary @file ${url.toString()}</span>
+    <span>e2e encrypted (web uploads)</span>
+    <span>curl --data-binary @file ${url.toString()} &mdash; stored unencrypted</span>
 </div>
 
 <input type="file" id="fileInput">
@@ -537,6 +589,12 @@ function showFile(f) {
     document.getElementById('statusLine').innerHTML = '';
     document.getElementById('statusLine').className = 'line status-line';
 
+    if (f.size > 10 * 1024 * 1024) {
+        setStatus('error: file exceeds the 10MB limit', 'err');
+        document.getElementById('passwordSection').classList.remove('active');
+        return;
+    }
+
     var pw = document.getElementById('passwordSection');
     pw.classList.add('active');
     if (!document.getElementById('passphrase').value) {
@@ -547,6 +605,34 @@ function showFile(f) {
 var selectedFile = null;
 var fileBuffer = null;
 var currentShareUrl = '';
+var textMode = false;
+
+function dropZoneClick() {
+    if (textMode) return;
+    document.getElementById('fileInput').click();
+}
+
+function enterTextMode() {
+    textMode = true;
+    selectedFile = null;
+    fileBuffer = null;
+    document.getElementById('dropZone').classList.add('text-mode');
+    document.getElementById('dropHint').style.display = 'none';
+    document.getElementById('fileMeta').style.display = 'none';
+    var ta = document.getElementById('textInput');
+    ta.classList.add('active');
+    ta.focus();
+    document.getElementById('passwordSection').classList.add('active');
+    if (!document.getElementById('passphrase').value) {
+        document.getElementById('passphrase').value = generatePassphrase();
+    }
+}
+
+function exitTextMode() {
+    textMode = false;
+    document.getElementById('dropZone').classList.remove('text-mode');
+    document.getElementById('textInput').classList.remove('active');
+}
 
 function showQRCode(shareUrl) {
     currentShareUrl = shareUrl;
@@ -566,6 +652,17 @@ function showQRCode(shareUrl) {
 
     shareUrlDiv.textContent = shareUrl;
     qrSection.classList.add('active');
+}
+
+function showDeleteUrl(deleteUrl) {
+    if (!deleteUrl) return;
+    var el = document.getElementById('deleteUrl');
+    el.innerHTML = '';
+    el.appendChild(document.createTextNode('delete link (save it): '));
+    var a = document.createElement('a');
+    a.href = deleteUrl;
+    a.textContent = deleteUrl;
+    el.appendChild(a);
 }
 
 function copyShareUrl() {
@@ -598,7 +695,30 @@ async function deriveKey(password, salt) {
 }
 
 async function doUpload() {
-    if (!fileBuffer) return;
+    var uploadName, uploadType;
+    if (textMode) {
+        var text = document.getElementById('textInput').value;
+        if (!text) {
+            setStatus('error: nothing to paste', 'err');
+            return;
+        }
+        fileBuffer = new TextEncoder().encode(text).buffer;
+        uploadName = 'paste.txt';
+        uploadType = 'text/plain';
+    } else {
+        if (!selectedFile) return;
+        if (!fileBuffer) {
+            // the read kicked off in handleFile may still be in flight for large files
+            fileBuffer = await selectedFile.arrayBuffer();
+        }
+        uploadName = selectedFile.name;
+        uploadType = selectedFile.type || 'application/octet-stream';
+    }
+
+    if (fileBuffer.byteLength > 10 * 1024 * 1024) {
+        setStatus('error: content exceeds the 10MB limit', 'err');
+        return;
+    }
 
     var password = document.getElementById('passphrase').value;
     if (!password) {
@@ -631,11 +751,12 @@ async function doUpload() {
         var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
         var ciphertext = nacl.secretbox(message, nonce, key);
 
-        var output = new Uint8Array(1 + salt.length + nonce.length + ciphertext.length);
-        output[0] = 0;
-        output.set(salt, 1);
-        output.set(nonce, 1 + salt.length);
-        output.set(ciphertext, 1 + salt.length + nonce.length);
+        var magic = [0, 0x47, 0x50, 0x45, 0x31]; // 0x00 "GPE1"
+        var output = new Uint8Array(magic.length + salt.length + nonce.length + ciphertext.length);
+        output.set(magic, 0);
+        output.set(salt, magic.length);
+        output.set(nonce, magic.length + salt.length);
+        output.set(ciphertext, magic.length + salt.length + nonce.length);
 
         setStatus('<span class="spinner">|</span> uploading (' + formatSize(output.length) + ')...');
 
@@ -656,13 +777,13 @@ async function doUpload() {
 
             xhr.onload = function() {
                 if (xhr.response && xhr.response.share_url) {
-                    var mimeType = selectedFile.type || 'application/octet-stream';
                     var shareUrl = xhr.response.share_url + '#;;;' +
                         encodeURIComponent(password) + ';;;' +
-                        encodeURIComponent(mimeType) + ';;;' +
-                        encodeURIComponent(selectedFile.name);
+                        encodeURIComponent(uploadType) + ';;;' +
+                        encodeURIComponent(uploadName);
                     setStatus('done', 'ok');
                     showQRCode(shareUrl);
+                    showDeleteUrl(xhr.response.delete_url);
                     resolve();
                 } else {
                     setStatus('error: unexpected response', 'err');
@@ -703,68 +824,48 @@ dropZone.addEventListener('drop', function(e) {
 fileInput.addEventListener('change', function(e) { if (e.target.files[0]) handleFile(e.target.files[0]); });
 
 function handleFile(f) {
+    exitTextMode();
     selectedFile = f;
     f.arrayBuffer().then(function(buf) { fileBuffer = buf; });
     showFile(f);
 }
+
+document.getElementById('pasteToggle').addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation(); // don't trigger the drop zone's file picker
+    enterTextMode();
+});
 </script>
 </body>
 </html>
 `; // eslint-disable-line
           return buildResponse(upload, DEFAULT_MIME_HTML, {}, 200, url);
         }
+        // deleting requires a POST (so link-preview crawlers can't trigger it) - GET shows a confirmation
+        if (url.searchParams.has("del")) {
+          return buildDeleteConfirmation(url, requestHeadersAndFriends);
+        }
         // ULID is len26
         if (key.length === 26 || key.length === 91) {
           let {
-            contentFromKeyAsArrayBuffer,
+            value: contentFromKeyAsArrayBuffer,
             metadata
           } =
           await NAMESPACE.getWithMetadata(key, "arrayBuffer");
-          // if either key dne, or old format
-          if (metadata === null) {
-            // check to see if old (pre-metadata)
-            contentFromKeyAsArrayBuffer = await NAMESPACE.get(
-              key,
-              "arrayBuffer",
-            );
-            if (contentFromKeyAsArrayBuffer !== null) {
-              contentFromKeyAsArrayBuffer = contentFromKeyAsArrayBuffer.slice(
-                0,
-                -26,
-              );
-            } else {
-              return buildResponse(
-                "Sorry, invalid key!",
-                DEFAULT_MIME_TEXT, {},
-                404,
-                url,
-              );
-            }
-          } else {
-            // this second get should not be required... it appears getWithMetadata doesn't support returning arrayBuffers!?
-            contentFromKeyAsArrayBuffer = await NAMESPACE.get(
-              key,
-              "arrayBuffer",
+          if (contentFromKeyAsArrayBuffer === null) {
+            return buildResponse(
+              "Sorry, invalid key!",
+              DEFAULT_MIME_TEXT, {},
+              404,
+              url,
             );
           }
-          // if both key and delete key...
-          if (url.searchParams.has("del") && del.length == 26) {
-            if (del === metadata.del) {
-              const deleted_target_key = await NAMESPACE.delete(key);
-              return buildResponse(
-                `OK, sent command to delete ${key} using ${del} - please wait 3min for full delete.`,
-                DEFAULT_MIME_TEXT, {},
-                200,
-                url,
-              );
-            } else {
-              return buildResponse(
-                "Sorry, invalid del key!",
-                DEFAULT_MIME_TEXT, {},
-                404,
-                url,
-              );
-            }
+          // old format (pre-metadata) appended the 26-char delete key to the content
+          if (metadata === null) {
+            contentFromKeyAsArrayBuffer = contentFromKeyAsArrayBuffer.slice(
+              0,
+              -26,
+            );
           }
           const [generatedBodyHtml, type] = generateHtmlBasedOnType(
             contentFromKeyAsArrayBuffer,
@@ -791,7 +892,8 @@ function handleFile(f) {
             // if requested as raw, return the original resp object with detected or custom MIME type
             return buildResponse(
               contentFromKeyAsArrayBuffer,
-              responseContentType, {},
+              responseContentType,
+              CACHE_CONTENT,
               200,
               url,
             );
@@ -800,7 +902,8 @@ function handleFile(f) {
           else {
             return buildResponse(
               generatedBodyHtml,
-              DEFAULT_MIME_HTML, {},
+              DEFAULT_MIME_HTML,
+              CACHE_CONTENT,
               200,
               url,
             );
@@ -813,12 +916,25 @@ function handleFile(f) {
             url,
           );
         }
+      } else {
+        // other methods (PUT/DELETE/...) used to fall through to an undefined response
+        return buildResponse(
+          "Method not allowed - use GET or POST.",
+          DEFAULT_MIME_TEXT, {
+            Allow: "GET, HEAD, POST, OPTIONS"
+          },
+          405,
+          url,
+        );
       }
     } else if (url.pathname === "/headers") {
       // helpful debug endpoint - return the headersAndFriends object, as a nicely formatted string
       requestHeadersAndFriends.url = url.toString();
       requestHeadersAndFriends.method = request.method;
       // first 20 bytes (hex-encoded) of the request
+      if (request.body) {
+        requestBodyForDebug = await request.arrayBuffer();
+      }
       if (requestBodyForDebug && requestBodyForDebug.byteLength > 0) {
         requestHeadersAndFriends.startBodyHex = hex(
           requestBodyForDebug.slice(0, 20),
@@ -845,16 +961,16 @@ function handleFile(f) {
       this_method_does_not_exist();
     } else if (url.pathname === "/naclfast.min.js") {
       // return NaCl crypto library (base64 decoded)
-      return buildResponse(str2ab(atob(naclfast_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(naclfast_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/argon2bundled.min.js") {
       // return Argon2 key derivation library (base64 decoded)
-      return buildResponse(str2ab(atob(argon2bundled_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(argon2bundled_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/qrcode.min.js") {
       // return QR code generation library (base64 decoded)
-      return buildResponse(str2ab(atob(qrcode_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(qrcode_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/marked.min.js") {
       // return Marked markdown parser (base64 decoded)
-      return buildResponse(str2ab(atob(marked_base64)), "application/javascript", {}, 200, url);
+      return buildResponse(str2ab(atob(marked_base64)), "application/javascript", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/about") {
       // return about/docs page
       const about_page = `<html><head>
@@ -991,7 +1107,10 @@ X-TTL: 3600          # seconds until expiry
 
 # URL parameters
 ?raw                 # return original file
-?cors=1              # enable CORS headers</code></pre>
+?cors=1              # enable CORS headers
+
+# delete a post (deletion requires POST; GET shows a confirmation page)
+curl -X POST "https://your.domain/post?key=KEY&amp;del=DELETE_KEY"</code></pre>
 
 <h2>deploy your own</h2>
 <p>GetPost runs on Cloudflare Workers &mdash; zero servers, global distribution, generous free tier (100k reads, 1k uploads daily).</p>
@@ -1021,9 +1140,10 @@ X-TTL: 3600          # seconds until expiry
       // returning binary requires UTF-16 JS strings to be converted to ie) UTF-8 bytes
       return buildResponse(
         str2ab(atob(favicon_gzip)),
-        "image/x-icon", {
+        "image/x-icon",
+        Object.assign({
           "Content-Encoding": "gzip"
-        },
+        }, CACHE_STATIC),
         200,
         url,
       );
@@ -1074,6 +1194,81 @@ function isValidContentType(contentType) {
   return true;
 }
 
+// detect CLI tools (curl/wget/etc) for content negotiation when Accept is generic
+function isCliRequest(requestHeadersAndFriends) {
+  const userAgent = requestHeadersAndFriends["user-agent"] || "";
+  return userAgent.startsWith("curl/") ||
+    userAgent.toLowerCase().includes("wget") ||
+    userAgent.toLowerCase().includes("python") ||
+    userAgent.toLowerCase().includes("node") ||
+    userAgent.toLowerCase().includes("go-http-client");
+}
+
+// validate a delete key against stored metadata (or the legacy appended key) and delete the post
+async function deletePost(url) {
+  const key = url.searchParams.get("key");
+  const del = url.searchParams.get("del");
+  if (!key || (key.length !== 26 && key.length !== 91)) {
+    return buildResponse("Sorry, invalid key!", DEFAULT_MIME_TEXT, {}, 404, url);
+  }
+  const {
+    value,
+    metadata
+  } = await NAMESPACE.getWithMetadata(key, "arrayBuffer");
+  if (value === null) {
+    return buildResponse("Sorry, invalid key!", DEFAULT_MIME_TEXT, {}, 404, url);
+  }
+  // old format (pre-metadata) appended the 26-char delete key to the content
+  const storedDel = metadata !== null ?
+    metadata.del :
+    new TextDecoder("utf-8").decode(new Uint8Array(value.slice(-26)));
+  if (del && del.length === 26 && del === storedDel) {
+    await NAMESPACE.delete(key);
+    return buildResponse(
+      `OK, sent command to delete ${key} - please wait 3min for full delete.`,
+      DEFAULT_MIME_TEXT, {},
+      200,
+      url,
+    );
+  }
+  return buildResponse("Sorry, invalid del key!", DEFAULT_MIME_TEXT, {}, 404, url);
+}
+
+// GET on a delete link returns instructions (CLI) or a confirmation page (browser) that POSTs back
+function buildDeleteConfirmation(url, requestHeadersAndFriends) {
+  if (isCliRequest(requestHeadersAndFriends)) {
+    return buildResponse(
+      `Deleting requires a POST:\n\n  curl -X POST "${url.href}"\n`,
+      DEFAULT_MIME_TEXT, {},
+      200,
+      url,
+    );
+  }
+  const confirmPage = `<html><head><title>GetPost - delete</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { background: #0d0d0d; color: #b0b0b0; font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 14px; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+.box { border: 1px solid #2a2a2a; border-radius: 4px; padding: 2rem; max-width: 420px; }
+.box .heading { color: #888; margin-bottom: 1.25rem; }
+button { width: 100%; padding: 0.5rem; background: none; color: #e53e3e; border: 1px solid #e53e3e; border-radius: 2px; font-family: inherit; font-size: 13px; cursor: pointer; }
+button:hover { background: rgba(229, 62, 62, 0.1); }
+#result { margin-top: 0.75rem; font-size: 12px; color: #888; word-break: break-all; }
+</style></head><body>
+<div class="box">
+  <div class="heading">delete this post?</div>
+  <button onclick="doDelete()">delete permanently</button>
+  <div id="result"></div>
+</div>
+<script>
+async function doDelete() {
+  var r = await fetch(window.location.pathname + window.location.search, { method: "POST" });
+  document.getElementById("result").textContent = await r.text();
+}
+</script>
+</body></html>`;
+  return buildResponse(confirmPage, DEFAULT_MIME_HTML, {}, 200, url);
+}
+
 // Handle CORS preflight requests
 function handleCorsPreflightRequest(url) {
   const corsHeaders = {
@@ -1099,22 +1294,6 @@ function addCorsHeaders(headers, url) {
   return headers;
 }
 
-// returns a single byte from the Cloudflare worker's (cryptographically secure) RNG
-function prng() {
-  const buffer = new Uint8Array(8);
-  crypto.getRandomValues(buffer);
-  return buffer[0] / 0xff;
-}
-
-// get a random character from the set of encodings
-function randomChar() {
-  let rand = Math.floor(prng() * ENCODING_LEN);
-  if (rand === ENCODING_LEN) {
-    rand = ENCODING_LEN - 1;
-  }
-  return ENCODING.charAt(rand);
-}
-
 // shove time (or any integer) into "len" base32 characters
 function encodeTime(now, len) {
   let mod;
@@ -1127,11 +1306,14 @@ function encodeTime(now, len) {
   return str;
 }
 
-// get "len" random base32 characters
+// get "len" random base32 characters from the worker's (cryptographically secure) RNG
 function encodeRandom(len) {
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
   let str = "";
-  for (; len > 0; len--) {
-    str = randomChar() + str;
+  for (let i = 0; i < len; i++) {
+    // 256 % 32 === 0, so the modulo is unbiased
+    str += ENCODING.charAt(bytes[i] % ENCODING_LEN);
   }
   return str;
 }
@@ -1197,8 +1379,13 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   }
   const contentAsUint8Array = new Uint8Array(content);
 
-  // Check if content is encrypted (first byte is 0x00)
-  const isEncrypted = contentAsUint8Array.length > 0 && contentAsUint8Array[0] === 0;
+  // encrypted container: 0x00 "GPE1" + salt + nonce + ciphertext
+  const isEncryptedNew = hex(contentAsUint8Array.slice(0, 5)) === "0047504531";
+  // legacy uploads used a bare 0x00 marker, which collides with mp4 and other
+  // zero-leading binaries - only assume legacy-encrypted when it isn't an mp42 container
+  const isEncrypted = isEncryptedNew ||
+    (contentAsUint8Array.length > 0 && contentAsUint8Array[0] === 0 &&
+      hex(contentAsUint8Array.slice(4, 12)) !== "667479706d703432");
 
   const contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
   // checks to see if characters are all plausibly utf-8 / printable
@@ -1224,10 +1411,12 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     // 00000000: 6674 7970 6d70 3432                      ftypmp42
     case "00000018":
     case "0000001c":
-      if (hex(contentAsUint8Array.slice(4, 12)) == "667479706d703432") {
+      if (hex(contentAsUint8Array.slice(4, 12)) === "667479706d703432") {
         type = "video/mp4";
-        break;
+      } else {
+        type = "application/octet-stream";
       }
+      break;
     case "25504446":
       type = "application/pdf";
       break;
@@ -1642,6 +1831,8 @@ body {
     var originalFilename = null;
 
     async function checkIfEncrypted() {
+        // the server already typed the payload - only refetch the raw bytes when it's encrypted
+        if (payloadType !== 'application/x-encrypted') return false;
         try {
             var rawUrl = window.location.href.split('#')[0] + '&raw';
             var response = await fetch(rawUrl, {
@@ -1675,7 +1866,7 @@ body {
                         }
                         showStatus('passphrase loaded, decrypting...', 'info');
                         setTimeout(function() { decryptContent(); }, 500);
-                        history.replaceState(null, null, window.location.pathname + window.location.search);
+                        // keep the fragment: stripping it made the address-bar URL unshareable
                     }
                 }
                 return true;
@@ -1735,8 +1926,15 @@ body {
                 throw new Error('invalid encrypted data format');
             }
 
-            var salt = encryptedData.slice(1, 17);
-            var nonceAndCiphertext = encryptedData.slice(17);
+            // new containers start 0x00 "GPE1"; legacy ones used a bare 0x00
+            var headerLen = 1;
+            if (encryptedData.length > 5 &&
+                encryptedData[1] === 0x47 && encryptedData[2] === 0x50 &&
+                encryptedData[3] === 0x45 && encryptedData[4] === 0x31) {
+                headerLen = 5;
+            }
+            var salt = encryptedData.slice(headerLen, headerLen + 16);
+            var nonceAndCiphertext = encryptedData.slice(headerLen + 16);
             var nonceSize = nacl.secretbox.nonceLength;
 
             if (nonceAndCiphertext.length < nonceSize) {
@@ -1890,7 +2088,8 @@ function buildResponse(
   statuscode = 200,
   url = null
 ) {
-  const headersObj = Object.assign(headers, {
+  // copy rather than mutate, so shared header constants stay clean across requests
+  const headersObj = Object.assign({}, headers, {
     "content-type": type
   });
 
