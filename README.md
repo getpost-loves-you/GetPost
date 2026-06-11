@@ -87,7 +87,7 @@ cd getpost
 - **🖼️ Images** - PNG, JPEG, GIF with instant preview
 - **📄 Documents** - PDFs, videos, any file type up to 10MB
 - **🔗 Raw Access** - Append `&raw` for direct file download
-- **⏰ Configurable TTL** - Default 1 year, customizable via X-TTL header
+- **⏰ Configurable TTL** - Default 1 year, customizable via X-TTL header; operators can unlock no-expiry posts with a secret key
 - **🗑️ Delete Keys** - Every upload gets a unique deletion URL
 - **🌐 CORS Support** - Add `?cors=1` for cross-origin requests
 - **🔍 Debug Tools** - `/headers`, `/echo` endpoints for troubleshooting

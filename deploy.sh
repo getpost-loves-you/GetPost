@@ -28,6 +28,15 @@ if [ ! -z "${KV_NAMESPACE_NAME:-}" ]; then
         echo "✓ Namespace already exists with ID: $NAMESPACE_ID"
     fi
 
+    # Optional operator secret that unlocks no-expiry posts (see PERMANENT_KEY in worker.js).
+    # secret_text keeps the value out of the API readback below; swap to plain_text if a
+    # provider rejects inline secrets.
+    EXTRA_BINDINGS=""
+    if [ -n "${PERMANENT_KEY:-}" ]; then
+        EXTRA_BINDINGS=$(printf ',\n    { "name": "PERMANENT_KEY", "type": "secret_text", "text": "%s" }' "$PERMANENT_KEY")
+        echo "  - PERMANENT_KEY binding enabled (permalinks unlocked for the operator)"
+    fi
+
     # Upload worker with KV binding (service worker format)
     echo "► Uploading worker script '$SCRIPT_NAME' with KV binding..."
     METADATA=$(cat <<EOF
@@ -38,7 +47,7 @@ if [ ! -z "${KV_NAMESPACE_NAME:-}" ]; then
       "name": "NAMESPACE",
       "type": "kv_namespace",
       "namespace_id": "$NAMESPACE_ID"
-    }
+    }$EXTRA_BINDINGS
   ]
 }
 EOF
