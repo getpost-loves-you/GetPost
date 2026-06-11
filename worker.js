@@ -572,6 +572,19 @@ function sanitizeHtml(str) {
     .replace(/\//g, '&#x2F;');
 }
 
+// wrap verbatim text in a fenced code block, escaping backtick runs that would
+// close the fence early and tagging an optional language for highlight class hooks
+function toCodeFence(text, lang) {
+  let longest = 0;
+  const runs = text.match(/`+/g);
+  if (runs) {
+    for (const run of runs) longest = Math.max(longest, run.length);
+  }
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  const tag = lang ? String(lang).replace(/[^a-zA-Z0-9+#-]/g, "").slice(0, 20) : "";
+  return fence + tag + "\n" + text + "\n" + fence;
+}
+
 // detect SVG: XML text whose root element is <svg, allowing a leading <?xml/comment/BOM
 function looksLikeSvg(str) {
   const head = str.slice(0, 1000).replace(/^﻿/, "").trimStart();
@@ -727,7 +740,20 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   const encodedPayload = "";
   // strip non-url characters from description
   if (type === DEFAULT_MIME_TEXT) {
-    contentAsHtmlFromMarked = marked(new TextDecoder("utf-8").decode(content));
+    const text = new TextDecoder("utf-8").decode(content);
+    // markdown by default; an explicit ?content_type of code/* or text other than
+    // markdown, or a ?lang= hint, renders verbatim in a fenced code block instead
+    const ct = (url && url.searchParams.get("content_type") || "").toLowerCase();
+    const lang = url && url.searchParams.get("lang");
+    const forceCode = !!lang ||
+      (ct && ct.indexOf("text/markdown") === -1 &&
+        (ct.indexOf("text/plain") === -1) && ct.indexOf("text/") === 0) ||
+      ct.indexOf("application/") === 0;
+    if (forceCode) {
+      contentAsHtmlFromMarked = marked(toCodeFence(text, lang));
+    } else {
+      contentAsHtmlFromMarked = marked(text);
+    }
     // use the first 140 characters that aren't special, as the description!
     description = new TextDecoder("utf-8")
       .decode(new Uint8Array(content.slice(0, 140)))

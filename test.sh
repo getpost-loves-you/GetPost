@@ -88,6 +88,11 @@ assert_eq "webp magic detected" "$(content_type "$(echo "$webp_json" | jq -r .ra
 svg_json=$(printf '<svg xmlns="http://www.w3.org/2000/svg"></svg>' | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
 assert_eq "svg detected" "$(content_type "$(echo "$svg_json" | jq -r .raw_url)")" "image/svg+xml"
 
+code_json=$(printf '# not a heading\ndef f(): pass' | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
+code_key=$(echo "$code_json" | jq -r .key)
+assert_contains "bare text post renders markdown" "$(curl -s "$BASE/post?key=$code_key")" "<h1"
+assert_contains "?lang renders as a code block" "$(curl -s "$BASE/post?key=$code_key&lang=python")" "language-python"
+
 echo "[encryption]"
 if python3 -c "import nacl" 2>/dev/null; then
     enc_share_url=$(echo -n "round trip test" | PASTEBIN="$BASE" PASTEBIN_PASSWORD="test-passphrase" ./pastebin-crypted.py 2>/dev/null | tail -n1)

@@ -1725,6 +1725,19 @@ function sanitizeHtml(str) {
     .replace(/\//g, '&#x2F;');
 }
 
+// wrap verbatim text in a fenced code block, escaping backtick runs that would
+// close the fence early and tagging an optional language for highlight class hooks
+function toCodeFence(text, lang) {
+  let longest = 0;
+  const runs = text.match(/`+/g);
+  if (runs) {
+    for (const run of runs) longest = Math.max(longest, run.length);
+  }
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  const tag = lang ? String(lang).replace(/[^a-zA-Z0-9+#-]/g, "").slice(0, 20) : "";
+  return fence + tag + "\n" + text + "\n" + fence;
+}
+
 // detect SVG: XML text whose root element is <svg, allowing a leading <?xml/comment/BOM
 function looksLikeSvg(str) {
   const head = str.slice(0, 1000).replace(/^﻿/, "").trimStart();
@@ -1880,7 +1893,20 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   const encodedPayload = "";
   // strip non-url characters from description
   if (type === DEFAULT_MIME_TEXT) {
-    contentAsHtmlFromMarked = marked(new TextDecoder("utf-8").decode(content));
+    const text = new TextDecoder("utf-8").decode(content);
+    // markdown by default; an explicit ?content_type of code/* or text other than
+    // markdown, or a ?lang= hint, renders verbatim in a fenced code block instead
+    const ct = (url && url.searchParams.get("content_type") || "").toLowerCase();
+    const lang = url && url.searchParams.get("lang");
+    const forceCode = !!lang ||
+      (ct && ct.indexOf("text/markdown") === -1 &&
+        (ct.indexOf("text/plain") === -1) && ct.indexOf("text/") === 0) ||
+      ct.indexOf("application/") === 0;
+    if (forceCode) {
+      contentAsHtmlFromMarked = marked(toCodeFence(text, lang));
+    } else {
+      contentAsHtmlFromMarked = marked(text);
+    }
     // use the first 140 characters that aren't special, as the description!
     description = new TextDecoder("utf-8")
       .decode(new Uint8Array(content.slice(0, 140)))
@@ -2241,6 +2267,48 @@ body {
     var originalMimeType = null;
     var originalFilename = null;
 
+    // map common filename extensions to a marked/highlight language hint
+    var EXT_LANG = {
+        py: 'python', js: 'javascript', mjs: 'javascript', ts: 'typescript',
+        jsx: 'jsx', tsx: 'tsx', json: 'json', html: 'html', htm: 'html',
+        css: 'css', sh: 'bash', bash: 'bash', zsh: 'bash', rb: 'ruby',
+        go: 'go', rs: 'rust', c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp',
+        hpp: 'cpp', java: 'java', kt: 'kotlin', swift: 'swift', php: 'php',
+        sql: 'sql', yaml: 'yaml', yml: 'yaml', toml: 'toml', ini: 'ini',
+        xml: 'xml', md: 'markdown', diff: 'diff', patch: 'diff', lua: 'lua',
+        pl: 'perl', r: 'r', scala: 'scala', clj: 'clojure', ex: 'elixir',
+        exs: 'elixir', hs: 'haskell', dockerfile: 'dockerfile'
+    };
+
+    function fileExt(filename) {
+        if (!filename) return '';
+        var m = /\.([A-Za-z0-9]+)$/.exec(filename);
+        return m ? m[1].toLowerCase() : '';
+    }
+
+    // decide whether printable content should be rendered as rich markdown.
+    // markdown only for markdown mime/extensions; a .txt extension always forces plain.
+    function renderAsMarkdown(mimeType, filename) {
+        var ext = fileExt(filename);
+        if (ext === 'txt') return false;
+        if (ext === 'md' || ext === 'mkd' || ext === 'markdown') return true;
+        var mt = (mimeType || '').toLowerCase();
+        if (mt.indexOf('text/markdown') !== -1) return true;
+        // default for unknown text (and explicit text/plain) is markdown, matching legacy behavior
+        return ext === '' && (mt === '' || mt.indexOf('text/plain') !== -1);
+    }
+
+    // wrap verbatim text in a fenced code block, escaping any backtick runs that
+    // would otherwise close the fence, and tagging a language from the extension
+    function toCodeFence(text, filename) {
+        var lang = EXT_LANG[fileExt(filename)] || '';
+        var longest = 0;
+        var runs = text.match(/\`+/g);
+        if (runs) for (var i = 0; i < runs.length; i++) longest = Math.max(longest, runs[i].length);
+        var fence = '\`'.repeat(Math.max(3, longest + 1));
+        return fence + lang + '\n' + text + '\n' + fence;
+    }
+
     async function checkIfEncrypted() {
         // the server already typed the payload - only refetch the raw bytes when it's encrypted
         if (payloadType !== 'application/x-encrypted') return false;
@@ -2415,11 +2483,14 @@ body {
 
         if (isPrintable) {
             try {
-                if (typeof marked !== 'undefined') {
+                if (typeof marked === 'undefined') throw new Error('no marked');
+                if (renderAsMarkdown(originalMimeType, originalFilename)) {
+                    // prose / markdown documents render as rich text
                     decryptedDiv.innerHTML = marked(dataString);
                 } else {
-                    decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
-                        dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
+                    // source, configs, logs, plain .txt: render verbatim in a fenced
+                    // code block so whitespace is kept and nothing is reinterpreted
+                    decryptedDiv.innerHTML = marked(toCodeFence(dataString, originalFilename));
                 }
             } catch (e) {
                 decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
