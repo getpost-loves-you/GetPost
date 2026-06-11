@@ -170,7 +170,8 @@ expires at: ${responseData.expires_at}`;
 **Expires at:** ${responseData.expires_at}`);
           return buildResponse(htmlResp, DEFAULT_MIME_HTML, {}, 200, url);
         }
-      } else if (request.method === "GET") {
+      } else if (request.method === "GET" || request.method === "HEAD") {
+        // the runtime strips the body from HEAD responses, so HEAD can share the GET path
         const key = url.searchParams.get("key");
         const raw = url.searchParams.has("raw");
         const customContentType = url.searchParams.get("content_type");
@@ -257,11 +258,11 @@ expires at: ${responseData.expires_at}`;
           );
         }
       } else {
-        // other methods (e.g. HEAD from link previewers) used to fall through to an undefined response
+        // other methods (PUT/DELETE/...) used to fall through to an undefined response
         return buildResponse(
           "Method not allowed - use GET or POST.",
           DEFAULT_MIME_TEXT, {
-            Allow: "GET, POST, OPTIONS"
+            Allow: "GET, HEAD, POST, OPTIONS"
           },
           405,
           url,
