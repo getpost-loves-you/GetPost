@@ -135,6 +135,11 @@ upload_page=$(curl -s "$BASE/post")
 assert_contains "upload page has drop zone" "$upload_page" 'id="dropZone"'
 assert_contains "upload page has paste mode" "$upload_page" 'id="pasteToggle"'
 assert_eq "about page 200" "$(http_code "$BASE/about")" "200"
+if curl -s "$BASE/pastebin-crypted.py" | cmp -s - pastebin-crypted.py; then
+    pass "served cli client byte-identical to repo copy"
+else
+    fail "served cli client byte-identical to repo copy"
+fi
 assert_eq "favicon 200" "$(http_code "$BASE/favicon.ico")" "200"
 for lib in naclfast.min.js argon2bundled.min.js qrcode.min.js marked.min.js; do
     assert_contains "$lib cached" "$(lower_headers "$BASE/$lib")" "max-age=86400"

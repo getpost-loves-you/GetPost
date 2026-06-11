@@ -108,7 +108,18 @@ pbpaste | curl --data-binary @- ${url.toString()}
 # custom expiration (1 hour)
 curl -H "X-TTL: 3600" --data-binary @file.txt ${url.toString()}</code></pre>
 
-<p>CLI uploads are stored unencrypted unless you encrypt the file yourself before uploading.</p>
+<p>CLI uploads are stored unencrypted unless you encrypt first &mdash; see below.</p>
+
+<h2>encrypted command line</h2>
+<p>This instance serves its own E2E encrypted CLI client (needs <code>python3</code> and <a href="https://pynacl.readthedocs.io/">PyNaCl</a>):</p>
+<pre><code># fetch the client from this instance
+curl -sO https://${url.host}/pastebin-crypted.py
+
+# encrypted upload (prints a share link with the passphrase in the fragment)
+echo "secret" | PASTEBIN=https://${url.host} python3 pastebin-crypted.py
+
+# encrypt a file
+PASTEBIN=https://${url.host} python3 pastebin-crypted.py myfile.txt</code></pre>
 
 <h2>one-liner script</h2>
 <p>Save as <code>/usr/local/bin/pastebin</code> and make executable:</p>

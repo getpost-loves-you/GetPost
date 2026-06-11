@@ -352,6 +352,11 @@ async function test(name, fn) {
     assert.strictEqual((await call("GET", "/about")).status, 200);
   });
 
+  await test("cli client served byte-identical to repo copy", async () => {
+    const served = await (await call("GET", "/pastebin-crypted.py")).text();
+    assert.strictEqual(served, fs.readFileSync(__dirname + "/pastebin-crypted.py", "utf8"));
+  });
+
   await test("OPTIONS preflight and cors=1 set allow-origin", async () => {
     const pre = await call("OPTIONS", "/post");
     assert.strictEqual(pre.status, 204);

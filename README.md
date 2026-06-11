@@ -47,6 +47,10 @@ pbpaste | curl --data-binary @- https://your-domain.com
 
 # Custom expiration
 curl -H "X-TTL: 3600" --data-binary @file.txt https://your-domain.com
+
+# E2E encrypted upload - every instance serves its own client (needs PyNaCl)
+curl -sO https://your-domain.com/pastebin-crypted.py
+echo "secret" | PASTEBIN=https://your-domain.com python3 pastebin-crypted.py
 ```
 
 ### One-Liner Script
