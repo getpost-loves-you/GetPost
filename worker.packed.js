@@ -1439,7 +1439,7 @@ PASTEBIN=https://${url.host} python3 pastebin-crypted.py myfile.txt</code></pre>
 <h2>one-liner script</h2>
 <p>Save as <code>/usr/local/bin/pastebin</code> and make executable:</p>
 <pre><code>#!/bin/bash
-curl --data-binary @$\{1:--\} ${url.toString()}</code></pre>
+curl --data-binary @\${1:--} ${url.toString()}</code></pre>
 <p>Usage: <code>pastebin myfile.txt</code> or <code>echo "hello" | pastebin</code></p>
 
 <h2>features</h2>
@@ -2282,8 +2282,10 @@ body {
 
     function fileExt(filename) {
         if (!filename) return '';
-        var m = /\.([A-Za-z0-9]+)$/.exec(filename);
-        return m ? m[1].toLowerCase() : '';
+        var dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot === filename.length - 1) return '';
+        var ext = filename.slice(dot + 1);
+        return /^[A-Za-z0-9]+$/.test(ext) ? ext.toLowerCase() : '';
     }
 
     // decide whether printable content should be rendered as rich markdown.
@@ -2299,14 +2301,18 @@ body {
     }
 
     // wrap verbatim text in a fenced code block, escaping any backtick runs that
-    // would otherwise close the fence, and tagging a language from the extension
+    // would otherwise close the fence, and tagging a language from the extension.
+    // NB: this file is embedded inside a backtick template literal in worker.js, so
+    // JS backslash escapes (newline, dot, etc) are consumed at pack time - avoid them
+    // in embedded code AND comments; build the newline via char code instead.
+    var NL = String.fromCharCode(10);
     function toCodeFence(text, filename) {
         var lang = EXT_LANG[fileExt(filename)] || '';
         var longest = 0;
         var runs = text.match(/\`+/g);
         if (runs) for (var i = 0; i < runs.length; i++) longest = Math.max(longest, runs[i].length);
         var fence = '\`'.repeat(Math.max(3, longest + 1));
-        return fence + lang + '\n' + text + '\n' + fence;
+        return fence + lang + NL + text + NL + fence;
     }
 
     async function checkIfEncrypted() {

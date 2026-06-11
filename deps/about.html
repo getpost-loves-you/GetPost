@@ -124,7 +124,7 @@ PASTEBIN=https://${url.host} python3 pastebin-crypted.py myfile.txt</code></pre>
 <h2>one-liner script</h2>
 <p>Save as <code>/usr/local/bin/pastebin</code> and make executable:</p>
 <pre><code>#!/bin/bash
-curl --data-binary @$\{1:--\} ${url.toString()}</code></pre>
+curl --data-binary @\${1:--} ${url.toString()}</code></pre>
 <p>Usage: <code>pastebin myfile.txt</code> or <code>echo "hello" | pastebin</code></p>
 
 <h2>features</h2>
