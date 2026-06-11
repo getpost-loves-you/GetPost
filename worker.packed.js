@@ -105,12 +105,16 @@ async function HANDLER(fetch_event) {
         const editKey = ulid(now);
         const deleteKey = ulid(now);
 
-        // Handle TTL
-        let xTtlSeconds = requestHeadersAndFriends["x-ttl"];
-        if (xTtlSeconds === undefined) {
-          xTtlSeconds = 365 * 24 * 60 * 60; // 1 year
-        } else {
-          xTtlSeconds = parseInt(xTtlSeconds, 10);
+        // Handle TTL. Passing the operator secret (PERMANENT_KEY binding) as X-TTL
+        // stores with no expiry - this gates permalinks to the operator so the
+        // public can't fill KV with content that never ages out.
+        const xTtlRaw = requestHeadersAndFriends["x-ttl"];
+        let xTtlSeconds = 365 * 24 * 60 * 60; // 1 year
+        let permanent = false;
+        if (typeof PERMANENT_KEY !== "undefined" && PERMANENT_KEY && xTtlRaw === PERMANENT_KEY) {
+          permanent = true;
+        } else if (xTtlRaw !== undefined) {
+          xTtlSeconds = parseInt(xTtlRaw, 10);
           // Validate parsed value - must be a positive number
           if (isNaN(xTtlSeconds) || xTtlSeconds <= 0) {
             xTtlSeconds = 365 * 24 * 60 * 60; // default to 1 year
@@ -119,17 +123,24 @@ async function HANDLER(fetch_event) {
           }
         }
 
-        const expiryTime = new Date(xTtlSeconds * 1000 + now).toISOString();
+        const expiryTime = permanent ?
+          "never" :
+          new Date(xTtlSeconds * 1000 + now).toISOString();
 
-        // Store the content
-        await NAMESPACE.put(storeKey, blob, {
-          expirationTtl: xTtlSeconds,
+        // Store the content - omit expirationTtl entirely for permanent posts
+        const putOptions = {
           metadata: {
             edit: editKey,
-            del: deleteKey,
-            expiry: expiryTime
+            del: deleteKey
           }
-        });
+        };
+        if (permanent) {
+          putOptions.metadata.permanent = true;
+        } else {
+          putOptions.expirationTtl = xTtlSeconds;
+          putOptions.metadata.expiry = expiryTime;
+        }
+        await NAMESPACE.put(storeKey, blob, putOptions);
 
         // Prepare response data
         const responseData = {
