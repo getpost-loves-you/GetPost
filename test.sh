@@ -127,6 +127,13 @@ assert_eq "PUT method 405" "$(http_code -X PUT --data "x" "$BASE/post")" "405"
 assert_eq "HEAD share link 200" "$(http_code -I "$share_url")" "200"
 assert_eq "sub-minimum ttl clamped, accepted" "$(echo ttl | http_code -H "X-TTL: 30" --data-binary @- "$BASE/post")" "200"
 assert_eq "garbage ttl accepted with default" "$(echo ttl | http_code -H "X-TTL: banana" --data-binary @- "$BASE/post")" "200"
+if [ -n "${PERMANENT_KEY:-}" ]; then
+    perm_json=$(echo -n "permalink" | curl -s -H "Accept: application/json" -H "X-TTL: $PERMANENT_KEY" --data-binary @- "$BASE/post")
+    assert_eq "operator secret unlocks no-expiry" "$(echo "$perm_json" | jq -r .expires_at)" "never"
+    assert_contains "permanent post viewer shows never" "$(curl -s "$(echo "$perm_json" | jq -r .share_url)")" "Never (permanent)"
+else
+    skip "permanent-post test (no PERMANENT_KEY in config)"
+fi
 assert_eq "oversize upload 413" "$(dd if=/dev/zero bs=1048576 count=11 2>/dev/null | http_code --data-binary @- "$BASE/post")" "413"
 assert_eq "invalid content_type 400" "$(http_code "${raw_url}&content_type=not_a_mime")" "400"
 

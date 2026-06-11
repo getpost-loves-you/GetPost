@@ -78,11 +78,20 @@ CF_API_TOKEN="your-api-token-here"
 SCRIPT_NAME="your-worker-name"
 DEPLOY_URL="https://your-worker-name.your-subdomain.workers.dev"
 
-# Optional: Test hashes (generated automatically on first run)
-# rendered_good="hash-will-be-generated"
-# upload_good="hash-will-be-generated"
-# image_good="hash-will-be-generated"
+# Required for KV binding via deploy.sh (creates the namespace if missing)
+KV_NAMESPACE_NAME="GETPOST"
+
+# Optional: operator secret that unlocks no-expiry posts. When set, deploy.sh
+# binds it as PERMANENT_KEY and passing it as the X-TTL header stores a post
+# that never expires. Leave unset to disable permalinks entirely.
+# PERMANENT_KEY="some-long-random-string"
 ```
+
+**Creating a permalink** (only works on an instance you deployed with `PERMANENT_KEY` set):
+```bash
+curl -H "X-TTL: $PERMANENT_KEY" --data-binary @file.txt https://your-domain.com
+```
+Permanent posts never free their KV space (free tier is 1GB), so keep the secret to yourself and use it deliberately. `deploy.sh` binds it as `secret_text`, so it stays out of the API readback — but if your provider rejects inline secrets, switch it to `plain_text` in `deploy.sh`.
 
 **Where to find these values:**
 - `CF_ACCOUNT_ID`: From Cloudflare dashboard sidebar or URL

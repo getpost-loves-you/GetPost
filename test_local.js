@@ -249,6 +249,44 @@ async function test(name, fn) {
     assert.strictEqual(resp.status, 413);
   });
 
+  console.log("[permanent posts]");
+
+  await test("operator secret as X-TTL stores with no expiry", async () => {
+    sandbox.PERMANENT_KEY = "test-secret";
+    try {
+      const json = await uploadJson("forever", { "X-TTL": "test-secret" });
+      const opts = sandbox.NAMESPACE.store.get(json.key).opts;
+      assert.strictEqual(opts.expirationTtl, undefined, "no expirationTtl");
+      assert.strictEqual(opts.metadata.permanent, true);
+      assert.strictEqual(opts.metadata.expiry, undefined);
+      assert.strictEqual(json.expires_at, "never");
+      const html = await (await call("GET", "/post?key=" + json.key)).text();
+      assert.ok(html.includes("Never (permanent)"));
+    } finally {
+      delete sandbox.PERMANENT_KEY;
+    }
+  });
+
+  await test("numeric X-TTL still expires when secret is set", async () => {
+    sandbox.PERMANENT_KEY = "test-secret";
+    try {
+      const json = await uploadJson("temp", { "X-TTL": "3600" });
+      const opts = sandbox.NAMESPACE.store.get(json.key).opts;
+      assert.strictEqual(opts.expirationTtl, 3600);
+      assert.ok(!opts.metadata.permanent);
+    } finally {
+      delete sandbox.PERMANENT_KEY;
+    }
+  });
+
+  await test("secret value is inert when no PERMANENT_KEY is bound", async () => {
+    // PERMANENT_KEY unset: the would-be secret is just a garbage TTL -> default year
+    const json = await uploadJson("nope", { "X-TTL": "test-secret" });
+    const opts = sandbox.NAMESPACE.store.get(json.key).opts;
+    assert.strictEqual(opts.expirationTtl, 365 * 24 * 60 * 60);
+    assert.ok(!opts.metadata.permanent);
+  });
+
   console.log("[handler: retrieval]");
 
   await test("share page renders with detected type", async () => {
