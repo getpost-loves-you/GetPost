@@ -269,10 +269,28 @@ Posts use [ULIDs](https://github.com/ulid/spec) instead of UUIDs:
 
 ### Content Type Detection
 GetPost examines file headers to determine MIME types:
-- **Magic bytes** for binary formats (PNG, PDF, etc.)
+- **Magic bytes** for binary formats — PNG, GIF, JPEG, WebP, SVG, PDF, MP4, WebM, MP3, Ogg, FLAC, WAV, ZIP
 - **UTF-8 validation** for text content
 - **Markdown rendering** for text files
-- **Raw passthrough** for unknown types
+- **Raw passthrough** for unknown types (`application/octet-stream`)
+
+### Encryption Format (GPE1 container)
+Browser uploads (and `pastebin-crypted.py`) encrypt client-side before upload. The stored blob is a self-describing binary container:
+
+```
+┌────────┬───────────┬────────────┬──────────────┐
+│ 5 bytes│  16 bytes │   24 bytes │   remainder  │
+│ 00 "GPE1" │  salt   │   nonce    │  ciphertext  │
+└────────┴───────────┴────────────┴──────────────┘
+```
+
+- **Magic** — `0x00` followed by ASCII `GPE1`. The leading NUL also flags the post as encrypted to the server so it serves the decrypt page instead of rendering; `GPE1` is the version tag (future formats can be `GPE2`).
+- **Salt** — 16 random bytes, per-upload.
+- **Key derivation** — Argon2id, `time=4` (iterations), `mem=65536` KiB (64 MB), `parallelism=1`, 32-byte output.
+- **Encryption** — NaCl `secretbox` (XSalsa20-Poly1305) with the 24-byte nonce; ciphertext includes the Poly1305 tag.
+- **Passphrase** — never sent to the server. It rides in the URL fragment (`#;;;passphrase;;;mime;;;filename`), which browsers don't transmit. The server only ever stores the container above.
+
+The passphrase, MIME type, and filename live only client-side; the server stores neither them nor any plaintext.
 
 ### Performance Characteristics
 - **Cold start:** ~50ms (Cloudflare Workers)
