@@ -1519,11 +1519,12 @@ curl -X POST "https://your.domain/post?key=KEY&amp;del=DELETE_KEY"</code></pre>
     } else {
       requestHeadersAndFriends.startBodyHex = "";
     }
-    return new Response(JSON.stringify(requestHeadersAndFriends, null, 2), {
-      status: 500,
-      statusText: "caught exception in worker",
-      headers: addCorsHeaders({}, url),
-    });
+    return buildResponse(
+      JSON.stringify(requestHeadersAndFriends, null, 2),
+      "application/json", {},
+      500,
+      url,
+    );
   }
 }
 
@@ -2495,13 +2496,8 @@ function buildResponse(
     addCorsHeaders(headersObj, url);
   }
 
-  if (statuscode !== 200) {
-    return new Response(blob, {
-      status: statuscode,
-      statusText: blob,
-      headers: headersObj,
-    });
-  }
+  // statusText is left default - the human-readable reason already lives in the body,
+  // and only a restricted charset is legal on the HTTP status line
   return new Response(blob, {
     status: statuscode,
     headers: headersObj
