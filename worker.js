@@ -209,7 +209,7 @@ expires at: ${responseData.expires_at}`;
         }
         // ULID is len26
         if (key.length === 26 || key.length === 91) {
-          let {
+          const {
             value: contentFromKeyAsArrayBuffer,
             metadata
           } =
@@ -220,13 +220,6 @@ expires at: ${responseData.expires_at}`;
               DEFAULT_MIME_TEXT, {},
               404,
               url,
-            );
-          }
-          // old format (pre-metadata) appended the 26-char delete key to the content
-          if (metadata === null) {
-            contentFromKeyAsArrayBuffer = contentFromKeyAsArrayBuffer.slice(
-              0,
-              -26,
             );
           }
           const [generatedBodyHtml, type] = generateHtmlBasedOnType(
@@ -417,25 +410,19 @@ function isCliRequest(requestHeadersAndFriends) {
     userAgent.toLowerCase().includes("go-http-client");
 }
 
-// validate a delete key against stored metadata (or the legacy appended key) and delete the post
+// validate a delete key against stored metadata and delete the post
 async function deletePost(url) {
   const key = url.searchParams.get("key");
   const del = url.searchParams.get("del");
   if (!key || (key.length !== 26 && key.length !== 91)) {
     return buildResponse("Sorry, invalid key!", DEFAULT_MIME_TEXT, {}, 404, url);
   }
-  const {
-    value,
-    metadata
-  } = await NAMESPACE.getWithMetadata(key, "arrayBuffer");
-  if (value === null) {
+  // metadata-only read - we don't need the content bytes just to verify the delete key
+  const { metadata } = await NAMESPACE.getWithMetadata(key, "text");
+  if (metadata === null) {
     return buildResponse("Sorry, invalid key!", DEFAULT_MIME_TEXT, {}, 404, url);
   }
-  // old format (pre-metadata) appended the 26-char delete key to the content
-  const storedDel = metadata !== null ?
-    metadata.del :
-    new TextDecoder("utf-8").decode(new Uint8Array(value.slice(-26)));
-  if (del && del.length === 26 && del === storedDel) {
+  if (del && del.length === 26 && del === metadata.del) {
     await NAMESPACE.delete(key);
     // best-effort purge of this PoP's cached copies so the deleter sees it gone
     // immediately; other PoPs age out via CACHE_CONTENT's max-age
@@ -584,6 +571,16 @@ function sanitizeHtml(str) {
     .replace(/\//g, '&#x2F;');
 }
 
+// detect SVG: XML text whose root element is <svg, allowing a leading <?xml/comment/BOM
+function looksLikeSvg(str) {
+  const head = str.slice(0, 1000).replace(/^﻿/, "").trimStart();
+  if (head.startsWith("<svg")) return true;
+  if (head.startsWith("<?xml") || head.startsWith("<!--")) {
+    return /<svg[\s>]/i.test(head);
+  }
+  return false;
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -600,12 +597,7 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   const contentAsUint8Array = new Uint8Array(content);
 
   // encrypted container: 0x00 "GPE1" + salt + nonce + ciphertext
-  const isEncryptedNew = hex(contentAsUint8Array.slice(0, 5)) === "0047504531";
-  // legacy uploads used a bare 0x00 marker, which collides with mp4 and other
-  // zero-leading binaries - only assume legacy-encrypted when it isn't an mp42 container
-  const isEncrypted = isEncryptedNew ||
-    (contentAsUint8Array.length > 0 && contentAsUint8Array[0] === 0 &&
-      hex(contentAsUint8Array.slice(4, 12)) !== "667479706d703432");
+  const isEncrypted = hex(contentAsUint8Array.slice(0, 5)) === "0047504531";
 
   const contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
   // checks to see if characters are all plausibly utf-8 / printable
@@ -652,6 +644,28 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "504b0304":
       type = "application/zip";
       break;
+    case "1a45dfa3":
+      // EBML container - WebM (video) or Matroska (.mkv); both are video/webm-ish to browsers
+      type = "video/webm";
+      break;
+    case "4f676753":
+      // OggS - could be audio or video; audio/ogg covers the common case
+      type = "audio/ogg";
+      break;
+    case "664c6143":
+      // fLaC
+      type = "audio/flac";
+      break;
+    case "52494646":
+      // RIFF container - WebP if bytes 8-12 are "WEBP", otherwise WAV if "WAVE"
+      if (hex(contentAsUint8Array.slice(8, 12)) === "57454250") {
+        type = "image/webp";
+      } else if (hex(contentAsUint8Array.slice(8, 12)) === "57415645") {
+        type = "audio/wav";
+      } else {
+        type = "application/octet-stream";
+      }
+      break;
     case "ffd8ffe0":
     case "ffd8ffe1":
     case "ffd8ffe2":
@@ -661,7 +675,12 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
       break;
     default:
       if (contentIsPrintable === true) {
-        type = DEFAULT_MIME_TEXT;
+        // SVG is XML text; sniff a leading <svg or <?xml ... <svg before treating as markdown
+        if (looksLikeSvg(contentAsString)) {
+          type = "image/svg+xml";
+        } else {
+          type = DEFAULT_MIME_TEXT;
+        }
       } else {
         type = "application/octet-stream";
       }
@@ -673,13 +692,20 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "image/png":
     case "image/gif":
     case "image/jpeg":
+    case "image/webp":
+    case "image/svg+xml":
+      // images render inline below via the imageUrl branch
       break;
     case "application/x-encrypted":
       // Encrypted content - let the HTML wrapper handle decryption
       injectorScript = "";
       break;
     case "audio/mp3":
+    case "audio/ogg":
+    case "audio/flac":
+    case "audio/wav":
     case "video/mp4":
+    case "video/webm":
     case "application/pdf":
     case "application/zip":
     case "application/octet-stream":

@@ -16,6 +16,7 @@ Environment variables:
 
 import sys
 import os
+import re
 import secrets
 import urllib.request
 import urllib.error
@@ -206,6 +207,26 @@ def detect_mime_type(content: bytes) -> str:
     if header == '504b0304':  # PK..
         return 'application/zip'
 
+    # EBML container - WebM / Matroska
+    if header == '1a45dfa3':
+        return 'video/webm'
+
+    # OggS
+    if header == '4f676753':
+        return 'audio/ogg'
+
+    # fLaC
+    if header == '664c6143':
+        return 'audio/flac'
+
+    # RIFF container - WebP or WAV
+    if header == '52494646' and len(content) >= 12:
+        riff = content[8:12].hex()
+        if riff == '57454250':  # WEBP
+            return 'image/webp'
+        if riff == '57415645':  # WAVE
+            return 'audio/wav'
+
     # JPEG (multiple possible headers)
     if header in ['ffd8ffe0', 'ffd8ffe1', 'ffd8ffe2', 'ffd8ffe3', 'ffd8ffe8']:
         return 'image/jpeg'
@@ -225,6 +246,12 @@ def detect_mime_type(content: bytes) -> str:
         content_is_printable = False
 
     if content_is_printable:
+        # SVG is XML text whose root element is <svg
+        head = text.lstrip('﻿').lstrip()
+        if head.startswith('<svg') or (
+            head.startswith(('<?xml', '<!--')) and re.search(r'<svg[\s>]', head, re.I)
+        ):
+            return 'image/svg+xml'
         return 'text/plain'
 
     return 'application/octet-stream'
