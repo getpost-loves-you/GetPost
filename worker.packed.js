@@ -1613,7 +1613,7 @@ body { background: #0d0d0d; color: #b0b0b0; font-family: 'SF Mono', 'Menlo', 'Co
 .box .heading { color: #888; margin-bottom: 1.25rem; }
 button { width: 100%; padding: 0.5rem; background: none; color: #e53e3e; border: 1px solid #e53e3e; border-radius: 2px; font-family: inherit; font-size: 13px; cursor: pointer; }
 button:hover { background: rgba(229, 62, 62, 0.1); }
-#result { margin-top: 0.75rem; font-size: 12px; color: #888; word-break: break-all; }
+#result { margin-top: 0.75rem; font-size: 12px; color: #888; line-height: 1.5; overflow-wrap: anywhere; }
 </style></head><body>
 <div class="box">
   <div class="heading">delete this post?</div>
