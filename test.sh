@@ -94,6 +94,7 @@ if python3 -c "import nacl" 2>/dev/null; then
     enc_page_url=$(echo "$enc_share_url" | sed 's/#.*//')
     enc_page=$(curl -s "$enc_page_url")
     assert_contains "server flags encrypted payload" "$enc_page" 'var payloadType = "application/x-encrypted"'
+    assert_contains "encrypted page offers download-encrypted link" "$enc_page" 'id="downloadEncrypted"'
     decrypted=$(curl -s "${enc_page_url}&raw" | python3 -c '
 import sys
 import nacl.secret, nacl.pwhash
