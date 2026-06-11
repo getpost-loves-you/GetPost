@@ -353,7 +353,8 @@ body {
             var arrayBuffer = await response.arrayBuffer();
             var data = new Uint8Array(arrayBuffer);
 
-            if (data.length > 0 && data[0] === 0) {
+            if (data.length > 5 && data[0] === 0 && data[1] === 0x47 &&
+                data[2] === 0x50 && data[3] === 0x45 && data[4] === 0x31) {
                 isEncrypted = true;
                 encryptedData = data;
                 showDecryptInterface();
@@ -428,19 +429,16 @@ body {
             document.getElementById('decryptButton').disabled = true;
             showStatus('deriving key (argon2id)...', 'info');
 
-            if (encryptedData[0] !== 0) {
+            // container: 0x00 "GPE1" + salt(16) + nonce(24) + ciphertext
+            if (encryptedData.length <= 5 ||
+                encryptedData[0] !== 0 || encryptedData[1] !== 0x47 ||
+                encryptedData[2] !== 0x50 || encryptedData[3] !== 0x45 ||
+                encryptedData[4] !== 0x31) {
                 throw new Error('invalid encrypted data format');
             }
 
-            // new containers start 0x00 "GPE1"; legacy ones used a bare 0x00
-            var headerLen = 1;
-            if (encryptedData.length > 5 &&
-                encryptedData[1] === 0x47 && encryptedData[2] === 0x50 &&
-                encryptedData[3] === 0x45 && encryptedData[4] === 0x31) {
-                headerLen = 5;
-            }
-            var salt = encryptedData.slice(headerLen, headerLen + 16);
-            var nonceAndCiphertext = encryptedData.slice(headerLen + 16);
+            var salt = encryptedData.slice(5, 21);
+            var nonceAndCiphertext = encryptedData.slice(21);
             var nonceSize = nacl.secretbox.nonceLength;
 
             if (nonceAndCiphertext.length < nonceSize) {
