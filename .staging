@@ -2,8 +2,3 @@ DEPLOY_URL="https://staging.getpost.workers.dev"
 CF_ACCOUNT_ID=d74b1ba4edf369b76c26da33d47da32b
 CF_API_TOKEN=de6lFVJ0xO0CjcGuNwDbYrS7j5PPT5zdKpAVNHqF
 SCRIPT_NAME=staging
-
-# Generated test hashes Wed Jul 16 01:59:25 EDT 2025
-rendered_good="d8ce4602136b7cadf44b27302d2c2f57a9819b8af88750009d2dae3b0d882f5f"
-upload_good="b7386bb7d2d579dceffe65238f4f4d7db5952b0a1ec417a0fb0f9dc82ae3c7c9"
-image_good="90cd3af8eb8b034e4d7143cc4a22b9853a2319e7b63c7c18d069315094aedbfb"
