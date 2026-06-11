@@ -180,14 +180,19 @@ getpost/
 
 ### Testing
 ```bash
-# Test against staging (using shared credentials)
+# Local unit tests - no deployment needed (node + python3)
+node test_local.js
+
+# End-to-end against staging (shared credentials)
 ./test.sh staging
 
-# Test your own deployment
+# End-to-end against your own deployment
 ./test.sh mydomain
 ```
 
-The suite uploads small probes against the live deployment and asserts behavior end to end: content negotiation, raw round trips, MIME detection, the encrypted round trip, the delete flow, error/limit handling, CORS, and asset caching. It needs `curl`, `jq`, and `python3`; the encryption tests skip gracefully without PyNaCl.
+`test_local.js` loads the packed worker into a sandbox with a mock KV namespace and unit-tests the helpers and the full request handler: ULIDs, MIME detection, encryption flagging, TTL clamping, the delete flow, limits, and CORS.
+
+`test.sh` uploads small probes against a live deployment and asserts behavior end to end: content negotiation, raw round trips, MIME detection, the encrypted round trip, the delete flow, error/limit handling, CORS, and asset caching. It needs `curl`, `jq`, and `python3`; the encryption tests skip gracefully without PyNaCl.
 
 ### Customization Ideas
 - **Custom CSS themes** - Edit `deps/getpost.css`
