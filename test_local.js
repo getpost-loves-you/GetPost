@@ -221,6 +221,28 @@ async function test(name, fn) {
     assert.ok(html.includes("<h1"));
   });
 
+  await test("server renders code-fence when content_type forces it", () => {
+    const src = "# a heading\n\nsome body text\n";
+    const renderWith = (q) => sandbox.generateHtmlBasedOnType(
+      new TextEncoder().encode(src).buffer,
+      new URL("https://t.local/post?key=X" + q), null, null)[0];
+    // bare text: markdown - "# a heading" becomes an <h1>, not a code block
+    const md = renderWith("");
+    assert.ok(md.includes("<h1") && !md.includes("<pre><code"));
+    // forced via content_type: verbatim in <pre><code>, heading syntax not interpreted
+    const code = renderWith("&content_type=text/x-python");
+    assert.ok(code.includes("<pre><code") && !code.includes("<h1"));
+    assert.ok(code.includes("# a heading"));
+    // ?lang= adds the highlight-friendly class
+    assert.ok(renderWith("&lang=python").includes("language-python"));
+  });
+
+  await test("toCodeFence escapes backtick runs so they can't close the fence", () => {
+    const out = sandbox.toCodeFence("a ``` b ```` c", "");
+    // fence must be longer than the longest internal run (4 -> 5)
+    assert.ok(out.startsWith("`````"));
+  });
+
   await test("custom title is sanitized", () => {
     const [html] = sandbox.generateHtmlBasedOnType(
       new TextEncoder().encode("hi").buffer,
