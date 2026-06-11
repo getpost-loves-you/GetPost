@@ -845,6 +845,16 @@ document.getElementById('pasteToggle').addEventListener('click', function(e) {
         if (url.searchParams.has("del")) {
           return buildDeleteConfirmation(url, requestHeadersAndFriends);
         }
+        // edge cache: serve repeat views from this PoP without touching KV.
+        // silently inert on *.workers.dev (the Cache API needs a custom-domain zone);
+        // staleness after delete is bounded by CACHE_CONTENT's max-age and the purge in deletePost
+        const edgeCache = caches.default;
+        if (request.method === "GET") {
+          const cachedResponse = await edgeCache.match(request);
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+        }
         // ULID is len26
         if (key.length === 26 || key.length === 91) {
           let {
@@ -890,23 +900,23 @@ document.getElementById('pasteToggle').addEventListener('click', function(e) {
             }
 
             // if requested as raw, return the original resp object with detected or custom MIME type
-            return buildResponse(
+            return cacheAndReturn(fetch_event, edgeCache, buildResponse(
               contentFromKeyAsArrayBuffer,
               responseContentType,
               CACHE_CONTENT,
               200,
               url,
-            );
+            ));
           }
           // otherwise, return the wrapped body with the text/html mimetype
           else {
-            return buildResponse(
+            return cacheAndReturn(fetch_event, edgeCache, buildResponse(
               generatedBodyHtml,
               DEFAULT_MIME_HTML,
               CACHE_CONTENT,
               200,
               url,
-            );
+            ));
           }
         } else {
           return buildResponse(
@@ -1504,6 +1514,14 @@ function isValidContentType(contentType) {
   return true;
 }
 
+// store a content response in the PoP-local cache and return it (the Cache API only accepts GET)
+function cacheAndReturn(fetch_event, edgeCache, response) {
+  if (fetch_event.request.method === "GET") {
+    fetch_event.waitUntil(edgeCache.put(fetch_event.request, response.clone()));
+  }
+  return response;
+}
+
 // detect CLI tools (curl/wget/etc) for content negotiation when Accept is generic
 function isCliRequest(requestHeadersAndFriends) {
   const userAgent = requestHeadersAndFriends["user-agent"] || "";
@@ -1534,6 +1552,13 @@ async function deletePost(url) {
     new TextDecoder("utf-8").decode(new Uint8Array(value.slice(-26)));
   if (del && del.length === 26 && del === storedDel) {
     await NAMESPACE.delete(key);
+    // best-effort purge of this PoP's cached copies so the deleter sees it gone
+    // immediately; other PoPs age out via CACHE_CONTENT's max-age
+    const edgeCache = caches.default;
+    for (const path of ["/", "/post"]) {
+      await edgeCache.delete(url.origin + path + "?key=" + key);
+      await edgeCache.delete(url.origin + path + "?key=" + key + "&raw");
+    }
     return buildResponse(
       `OK, sent command to delete ${key} - please wait 3min for full delete.`,
       DEFAULT_MIME_TEXT, {},
