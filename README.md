@@ -1,43 +1,38 @@
-# GetPost v1.2
+# GetPost v2.0
 
-**Libre linking for poems and memes**
-🚀 **Run your own instance for free on any domain**🚀
+**End-to-end encrypted file sharing on Cloudflare Workers.**
+🔐 Encrypted in your browser before it ever leaves. No accounts, no tracking, globally distributed.
+🚀 Run your own instance for free, on any domain.
 
-GetPost is a simple, secure [imagebin](https://en.wikipedia.org/wiki/Image_hosting_service) and [pastebin](https://www.urbandictionary.com/define.php?term=Pastebin) built on Cloudflare Workers.
-Share text, images, and files up to 10MB with no accounts, no tracking, and global distribution.
-
+GetPost is a small, hackable [pastebin](https://www.urbandictionary.com/define.php?term=Pastebin) and file host. Drop a file in the browser and it's encrypted client-side — the server only ever stores opaque ciphertext, and the passphrase travels in the URL fragment, which never reaches the server. Prefer the terminal? There's a one-liner curl path and an encrypted CLI client each instance serves itself.
 
 ```bash
-# Try it now
+# Try it now (plaintext, quick)
 curl --data-binary @myfile.txt https://public.getpost.workers.dev
 
 # Deploy your own in minutes
 git clone https://github.com/getpost-loves-you/getpost
-cp .staging .mydomain
-<add API keys>
+cp .staging .mydomain      # add your Cloudflare API keys
 ./deploy.sh mydomain
 ```
 
 ## Why GetPost?
 
-**For Users:**
-- 📝 **Instant sharing** - Text, markdown, images, most other filetypes
-- 🔗 **Clean URLs** - Short, shareable links with delete keys
-- ⚡ **Fast worldwide** - Sub-100ms response times via Cloudflare edge
-- 🛡️ **Privacy-focused** - No tracking, no ads, no accounts required
-
-**For Self-Hosters:**
-- 💰 **Free forever** - Cloudflare's generous free tier (100k reads, 1k uploads daily)
-- 🔧 **Zero maintenance** - No servers, no updates, no downtime
-- 🌍 **Global by default** - Your content is distributed worldwide automatically
-- 🎨 **Hackable** - Minimal, suckless codebase that is easy to customize
+- 🔐 **End-to-end encrypted** — web uploads are encrypted in-browser with NaCl SecretBox + Argon2id; the server never sees your plaintext or your passphrase.
+- 🔗 **One link to share** — the passphrase rides in the URL fragment, so anyone with the link can decrypt, and no one without it can.
+- 🗑️ **You hold the delete key** — every upload gets a unique deletion URL.
+- ⚡ **Globally distributed** — runs at Cloudflare's edge, with popular content cached close to readers.
+- 🛡️ **No accounts, no tracking** — no cookies, no analytics, no third-party scripts.
+- 🎨 **Hackable & free** — a minimal, suckless codebase on Cloudflare's free tier (100k reads, 1k writes daily). No Wrangler, no NPM, no Rust toolchain.
 
 ## Quick Start
 
-### Web Upload
-Visit your GetPost instance and drag & drop files. Markdown is rendered automatically via [marked](https://github.com/markedjs/marked).
+### Web Upload (encrypted)
+Visit your GetPost instance and drag a file onto the page — or click *paste text* to type directly. A passphrase is generated for you (edit it if you like), the file is encrypted in your browser, and you get a share link with a QR code. The passphrase is embedded in the link's fragment; the server stores only the encrypted container.
 
-### Command Line
+Markdown renders as rich text; source files and other text render as syntax-aware code blocks; images, audio, video, and PDFs preview inline.
+
+### Command Line (plaintext)
 ```bash
 # Basic upload
 curl --data-binary @file.txt https://your-domain.com
@@ -47,257 +42,190 @@ pbpaste | curl --data-binary @- https://your-domain.com
 
 # Custom expiration
 curl -H "X-TTL: 3600" --data-binary @file.txt https://your-domain.com
+```
+CLI uploads are stored **unencrypted** unless you encrypt first — see below.
 
-# E2E encrypted upload - every instance serves its own client (needs PyNaCl)
+### Command Line (encrypted)
+Every instance serves its own E2E-encrypted client (needs `python3` and [PyNaCl](https://pynacl.readthedocs.io/)):
+```bash
 curl -sO https://your-domain.com/pastebin-crypted.py
 echo "secret" | PASTEBIN=https://your-domain.com python3 pastebin-crypted.py
+# or encrypt a file:
+PASTEBIN=https://your-domain.com python3 pastebin-crypted.py myfile.txt
 ```
+It prints a share link with the passphrase in the fragment, decryptable by the web viewer or the client.
 
-### One-Liner Script
+### One-Liner Alias
 Save as `/usr/local/bin/pastebin`:
 ```bash
 #!/bin/bash
 curl --data-binary @${1:--} https://your-domain.com
 ```
-
-Usage: `pastebin file.txt` or `echo "hello" | pastebin`
+Usage: `pastebin file.txt` or `echo "hello" | pastebin`.
 
 ## Deploy Your Own
 
-GetPost runs on **Cloudflare Workers** - zero servers, global distribution, generous free tier (100k reads, 1k uploads daily).
+GetPost runs entirely on **Cloudflare Workers** — no servers to run, global distribution, generous free tier.
 
 ```bash
 git clone https://github.com/getpost-loves-you/getpost
 cd getpost
-# Follow SETUP.md for detailed instructions
+cp .staging .mydomain      # add CF_ACCOUNT_ID, CF_API_TOKEN, etc.
 ./deploy.sh mydomain
+./test.sh mydomain
 ```
 
-**Why Self-Host?**
-- 💰 **Free forever** - No hosting costs on Cloudflare's free tier
-- 🌍 **Your domain** - Custom branding and control
-- 🔧 **Zero maintenance** - No servers, no updates, no downtime
-- 🛡️ **Privacy** - Your data stays in your KV namespace
+The deploy needs only `curl`, `python3`, `jq`, and a Linux-like shell (macOS, Linux, WSL, Termux). No Wrangler, no NPM, no Rust. Full walkthrough in **[SETUP.md](SETUP.md)**.
 
-📄 **[Full Setup Guide →](SETUP.md)**
+**Why self-host?** Your domain, your KV namespace, your data — and it costs nothing on the free tier.
 
 ## Features
 
-- **📝 Text & Markdown** - Server-side rendering with clean typography
-- **🖼️ Images** - PNG, JPEG, GIF with instant preview
-- **📄 Documents** - PDFs, videos, any file type up to 10MB
-- **🔗 Raw Access** - Append `&raw` for direct file download
-- **⏰ Configurable TTL** - Default 1 year, customizable via X-TTL header; operators can unlock no-expiry posts with a secret key
-- **🗑️ Delete Keys** - Every upload gets a unique deletion URL
-- **🌐 CORS Support** - Add `?cors=1` for cross-origin requests
-- **🔍 Debug Tools** - `/headers`, `/echo` endpoints for troubleshooting
-
-## Architecture
-
-**Built on Cloudflare Workers** - a globally distributed edge computing platform.
-
-```
-User → Cloudflare Edge → Worker → KV Storage
-```
-
-- **Workers:** JavaScript runtime at 200+ locations worldwide
-- **KV Storage:** Eventually-consistent key-value store, AES-256 encrypted
-- **ULIDs:** Lexicographically sortable identifiers for posts and delete keys
-- **Zero dependencies:** Self-contained, no external services
-- **Crypto Libraries:** [TweetNaCl.js](https://github.com/dchest/tweetnacl-js) for encryption, [argon2-browser](https://github.com/antelle/argon2-browser) for key derivation
-
-### Why Cloudflare Workers?
-
-From Cloudflare's documentation:
-
-> Workers KV supports exceptionally high read volumes with low-latency, making it possible to build highly dynamic APIs and websites which respond as quickly as a cached static file would.
-
-Perfect for a pastebin! Popular content gets cached globally, while the free tier offers:
-- 100,000 reads per day
-- 1,000 writes per day
-- Sub-100ms cold start times
-- 128MB memory per request
+- **🔐 Client-side encryption** — NaCl SecretBox (XSalsa20-Poly1305) + Argon2id, all in-browser
+- **📝 Smart rendering** — markdown as rich text, source as fenced code blocks (`?lang=` or filename hint), everything else verbatim
+- **🖼️ Inline media** — PNG, JPEG, GIF, WebP, SVG, MP4, WebM, MP3, Ogg, FLAC, WAV, PDF
+- **🔗 Raw access** — append `&raw` to any link for the original bytes
+- **⏰ Configurable TTL** — default 1 year, set via `X-TTL` (seconds); operators can unlock no-expiry posts with a secret key
+- **🗑️ Delete keys** — every upload gets a unique deletion URL (deletion requires POST, so link crawlers can't trigger it)
+- **🌐 CORS** — add `?cors=1` for cross-origin reads
+- **⚡ Edge caching** — content is cached at the PoP and purged on delete (custom domains)
 
 ## Security Model
 
-GetPost prioritizes **simplicity over complexity** in its security approach:
+GetPost favors **transparent simplicity** over false promises.
 
-**What's Protected:**
-- 🔐 **End-to-end encryption** - Web uploads are encrypted in-browser (NaCl SecretBox + Argon2id); the server never sees plaintext or passphrases
-- 🔐 **Access control** - 80 bits of entropy in ULIDs (stronger than most passwords)
-- 🔒 **Data at rest** - AES-256 encryption by Cloudflare
-- 🌐 **Data in transit** - TLS encryption for all requests
-- 🚫 **No tracking** - No cookies, analytics, or third-party scripts
+**What's protected:**
+- 🔐 **End-to-end encryption** — web (and `pastebin-crypted.py`) uploads are encrypted before they leave your device; the server only stores ciphertext.
+- 🔑 **The passphrase never reaches the server** — it lives in the URL fragment, which browsers don't transmit.
+- 🔒 **Data at rest & in transit** — Cloudflare's AES-256 on KV, TLS on every request.
+- 🚫 **No tracking** — no cookies, analytics, or third-party scripts.
 
-**What's Not Protected:**
-- CLI uploads (`curl`) are stored unencrypted unless you encrypt first (use `pastebin-crypted.py`)
-- Encrypted content is theoretically accessible to Cloudflare employees, [with some difficulty](https://developers.cloudflare.com/kv/reference/data-security/) - but only as ciphertext
-- Share links embed the passphrase in the URL fragment: anyone with the link can decrypt
-- Your computer.
+**What's not:**
+- **Plain `curl` uploads are stored unencrypted** — use `pastebin-crypted.py` (or encrypt the file yourself) if you want E2E from the terminal.
+- **Anyone with the link can decrypt** — the passphrase is in the fragment by design, so treat share links like the secret they contain.
+- **Encrypted content is opaque to Cloudflare** but still sits on their infrastructure [as ciphertext](https://developers.cloudflare.com/kv/reference/data-security/).
+- **Your own machine** — GetPost can't protect what happens after you decrypt.
 
-**Privacy Philosophy:**
-We choose transparent simplicity over false security promises. For most use cases, ULID-based access control and Cloudflare's infrastructure security are sufficient.
+> **A note on rendering:** by design, an instance will serve arbitrary content — including HTML/SVG — back to the browser. That's a feature (one-command static hosting), but it means a public instance can host whatever someone uploads. Run a public instance on a domain whose reputation you're willing to share.
+
+## How It Works
+
+```
+You → Cloudflare Edge → Worker → KV Storage
+```
+
+- **Workers** — JavaScript running at Cloudflare's edge locations worldwide.
+- **KV storage** — eventually-consistent key/value store, AES-256 encrypted at rest.
+- **ULIDs** — lexicographically sortable, 26-char Crockford base32 ids for posts and delete keys.
+- **Self-contained** — crypto libs ([TweetNaCl.js](https://github.com/dchest/tweetnacl-js), [argon2-browser](https://github.com/antelle/argon2-browser)), the markdown parser ([marked](https://github.com/markedjs/marked)), and QR generation are all embedded at build time. No external runtime dependencies.
 
 ## Development
 
 ### Hacking
 
-It's free and easy to get started with your own GetPost instance, either on a domain you already own, or a free "*.workers.dev" subdomain.
+It's free and easy to spin up your own instance, on a domain you own or a `*.workers.dev` subdomain. To make that painless, shared credentials are included so anyone can deploy to `https://staging.getpost.workers.dev` and try the full flow — plus end-to-end tests and heavily commented source. (Because I love you, I spared you the toolchain misadventures.)
 
-Because I love you, I have included a set of credentials allowing anyone to deploy to "https://staging.getpost.workers.dev" - as well as a set of end-to-end tests, and lots of source code comments. Also spared interested parties from painful toolchain misadventures!
+Make a small edit to `worker.js` or something in `deps/`, then:
+```bash
+./deploy.sh staging      # assemble + upload to staging.getpost.workers.dev
+./test.sh staging        # verify it still behaves
+```
 
-GetPost doesn't require the use of Cloudflare's Wrangler tool, the Node Package Manager, or a Rust buildchain. It does require `curl`, `python3`, and a Linux-like environment (termux or WSL should work).
+Be excellent to one another — and set up your own credentials (see [SETUP.md](SETUP.md)) before doing anything real, since others share that staging key too.
 
 ### Build Process
+There's no bundler. `autoinsert.py` reads `worker.js`, inlines the files from `deps/` (HTML pages, base64-encoded libraries) at their `AUTOINSERT_` markers, and writes `worker.packed.js`. `deploy.sh` runs that build, sources credentials from a local `.<name>` file, and uploads the packed worker to Cloudflare.
 
-To keep the main worker.js file manageable, a simple well-documented Python script - `autoinsert.py` - loads files from the `deps` folder into `worker.js` to make `worker.packed.js`.
-
-The `deploy.sh` script calls autoinsert.py to assemble the packed worker, loads credentials from a file in the local directory, and uploads the `worker.packed.js` file to Cloudflare.
-
-You can get started by cloning this repository, making a small edit to `worker.js` or one of the resources in `deps` - and running `./deploy.sh staging`.
-
-This loads the credentials from the `.staging` file, assembles your changes, and uploads the file.
-
-Your script will then start running on "https://staging.getpost.workers.dev" - and you can verify it works as expected by running `./test.sh staging`
-
-This loads other values from the `.staging` file, makes a series of requests to the staging URL, and prints "ALL TESTS PASSED" if the responses to the inputs are all as expected.
-
-Be excellent to one another, and follow the instructions in SETUP.md to create your own account with your own credentials, if you intend to do any real work - after all, other folks may also avail themselves of the staging deploy API key!
+> Embedded HTML is spliced into a JS backtick template literal, so `autoinsert.py` rejects stray backslash escapes in those files at build time — they'd be silently eaten otherwise.
 
 ### Project Structure
 ```
 getpost/
-├── worker.js            # Main Cloudflare Worker code
-├── autoinsert.py        # Build script (embeds deps/ into worker)
-├── deploy.sh            # Deployment automation
-├── test.sh              # End-to-end testing
-├── pastebin-crypted.py  # E2E encrypted CLI uploader
-├── SETUP.md             # Detailed deployment guide
-├── deps/                # Static assets (embedded at build time)
-│   ├── upload.html      # Upload page (encrypts in-browser)
-│   ├── getpost.html     # Content viewer (decrypts in-browser)
-│   ├── about.html       # About page
-│   ├── marked.min.js    # Markdown parser
-│   └── *.base64         # NaCl, Argon2, QR code libraries
-└── .staging             # Shared staging credentials + test hashes
+├── worker.js            # the Cloudflare Worker (all request handling)
+├── autoinsert.py        # build: embeds deps/ into worker.packed.js
+├── deploy.sh            # build + upload to Cloudflare
+├── test.sh              # end-to-end tests against a live deployment
+├── test_local.js        # offline unit tests (sandboxed worker + mock KV)
+├── pastebin-crypted.py  # E2E-encrypted CLI uploader (also served by each instance)
+├── SETUP.md             # full deployment guide
+├── deps/                # assets embedded at build time
+│   ├── upload.html      #   upload page (encrypts in-browser)
+│   ├── getpost.html     #   content viewer (decrypts in-browser)
+│   ├── about.html       #   about / help page
+│   ├── marked.min.js    #   markdown parser
+│   └── *.base64         #   NaCl, Argon2, QR-code libraries
+└── .staging             # shared staging credentials
 ```
 
 ### Testing
 ```bash
-# Local unit tests - no deployment needed (node + python3)
-node test_local.js
-
-# End-to-end against staging (shared credentials)
-./test.sh staging
-
-# End-to-end against your own deployment
-./test.sh mydomain
+node test_local.js       # offline unit tests — no deploy needed (node + python3)
+./test.sh staging        # end-to-end against shared staging
+./test.sh mydomain       # end-to-end against your own deployment
 ```
+`test_local.js` loads the packed worker into a sandbox with a mock KV namespace and exercises the helpers and the full request handler — ULIDs, MIME detection, encryption flagging, TTL clamping, the delete flow, limits, edge caching, and rendered-page integrity.
 
-`test_local.js` loads the packed worker into a sandbox with a mock KV namespace and unit-tests the helpers and the full request handler: ULIDs, MIME detection, encryption flagging, TTL clamping, the delete flow, limits, and CORS.
+`test.sh` fires real requests at a live deployment and asserts behavior end to end, including an encrypted round trip. It needs `curl`, `jq`, and `python3`; encryption tests skip gracefully without PyNaCl.
 
-`test.sh` uploads small probes against a live deployment and asserts behavior end to end: content negotiation, raw round trips, MIME detection, the encrypted round trip, the delete flow, error/limit handling, CORS, and asset caching. It needs `curl`, `jq`, and `python3`; the encryption tests skip gracefully without PyNaCl.
-
-### Customization Ideas
-- **Custom CSS themes** - Edit `deps/getpost.css`
-- **File type support** - Extend `generateHtmlBasedOnType()`
-- **Rate limiting** - Add IP-based restrictions
-- **Analytics** - Track usage stats (respect privacy!)
-- **Content filtering** - Add moderation hooks
+### Contributing
+1. Verify with `node test_local.js` and `./test.sh staging`.
+2. Update `RELEASE_NOTES.md` and `README.md`.
+3. Follow [SemVer](https://semver.org/).
+4. Open a PR with a clear description.
 
 ## API Reference
 
 ### Upload
-```bash
+```
 POST /post
 Content-Type: application/octet-stream
-X-TTL: 3600  # Optional: expiry in seconds (min 60, default 1 year)
-
-# Max 10MB; response includes share link and delete key
+X-TTL: 3600          # optional: seconds until expiry (min 60, default 1 year)
 ```
+Max 10MB. Response carries the share link, raw link, and delete link; send `Accept: application/json` for a JSON body.
 
 ### Retrieve
-```bash
-GET /post?key=ULID          # Rendered HTML view
-GET /post?key=ULID&raw      # Original file
-GET /post?key=ULID&cors=1   # With CORS headers
+```
+GET /post?key=ULID          # rendered HTML view
+GET /post?key=ULID&raw      # original bytes
+GET /post?key=ULID&lang=py  # render text as a code block in the given language
+GET /post?key=ULID&cors=1   # add CORS headers
 ```
 
 ### Delete
 ```bash
-POST /post?key=ULID&del=DELETE_KEY
-
-# e.g.
 curl -X POST "https://your-domain.com/post?key=ULID&del=DELETE_KEY"
 ```
-GET on a delete link returns a confirmation page instead of deleting, so link-preview crawlers can't destroy content.
+A `GET` on a delete link returns a confirmation page rather than deleting, so link-preview crawlers can't destroy content.
 
 ### Debug
-```bash
-GET /headers    # Request headers and metadata
-GET /echo       # Echo request body
+```
+GET /headers    # request headers + metadata, as JSON
+GET /echo       # echoes the request body
 ```
 
-## Community
+## Encryption Format (GPE1 container)
 
-**Philosophy:** CC0. No Rights Reserved. Fork it, hack it, improve it, deploy it everywhere.
-
-- 📄 [Source Code](https://github.com/getpost-loves-you/getpost)
-- 🚀 [Setup Guide](SETUP.md)
-- 🐛 [Report Issues](https://github.com/getpost-loves-you/getpost/issues)
-
-### Contributing
-1. Test changes with `./test.sh staging`
-2. Update `RELEASE_NOTES.md` and `README.md`
-3. Follow [SemVer](https://semver.org/) for version numbers
-4. Submit PRs with clear descriptions
-
-### Inspiration
-GetPost revives the spirit of personal file servers from the pre-GitHub era, when sharing a file meant SCPing it to your homepage. We've made that experience:
-- Globally distributed (via Cloudflare's edge network)
-- Zero maintenance (no servers to patch)
-- Free forever (generous cloud free tiers)
-- Instantly deployable (minutes, not hours)
-
-## Advanced Topics
-
-### ULID Format
-Posts use [ULIDs](https://github.com/ulid/spec) instead of UUIDs:
-- **Lexicographically sortable** (chronological ordering)
-- **26 characters** vs UUID's 36 (shorter URLs)
-- **Crockford base32** (avoids visual ambiguity: 0/O, 1/I/L)
-
-### Content Type Detection
-GetPost examines file headers to determine MIME types:
-- **Magic bytes** for binary formats — PNG, GIF, JPEG, WebP, SVG, PDF, MP4, WebM, MP3, Ogg, FLAC, WAV, ZIP
-- **UTF-8 validation** for text content
-- **Markdown rendering** for text files
-- **Raw passthrough** for unknown types (`application/octet-stream`)
-
-### Encryption Format (GPE1 container)
-Browser uploads (and `pastebin-crypted.py`) encrypt client-side before upload. The stored blob is a self-describing binary container:
+Browser uploads and `pastebin-crypted.py` produce a self-describing binary container:
 
 ```
-┌────────┬───────────┬────────────┬──────────────┐
-│ 5 bytes│  16 bytes │   24 bytes │   remainder  │
-│ 00 "GPE1" │  salt   │   nonce    │  ciphertext  │
-└────────┴───────────┴────────────┴──────────────┘
+┌───────────┬──────────┬───────────┬──────────────┐
+│  5 bytes  │ 16 bytes │  24 bytes │   remainder  │
+│ 00 "GPE1" │   salt   │   nonce   │  ciphertext  │
+└───────────┴──────────┴───────────┴──────────────┘
 ```
 
-- **Magic** — `0x00` followed by ASCII `GPE1`. The leading NUL also flags the post as encrypted to the server so it serves the decrypt page instead of rendering; `GPE1` is the version tag (future formats can be `GPE2`).
-- **Salt** — 16 random bytes, per-upload.
-- **Key derivation** — Argon2id, `time=4` (iterations), `mem=65536` KiB (64 MB), `parallelism=1`, 32-byte output.
-- **Encryption** — NaCl `secretbox` (XSalsa20-Poly1305) with the 24-byte nonce; ciphertext includes the Poly1305 tag.
-- **Passphrase** — never sent to the server. It rides in the URL fragment (`#;;;passphrase;;;mime;;;filename`), which browsers don't transmit. The server only ever stores the container above.
+- **Magic** — `0x00` + ASCII `GPE1`. The leading NUL flags the post as encrypted to the server (so it serves the decrypt page); `GPE1` is the version tag (room for `GPE2`).
+- **Salt** — 16 random bytes, per upload.
+- **Key derivation** — Argon2id: `time=4`, `mem=65536` KiB (64 MB), `parallelism=1`, 32-byte key.
+- **Encryption** — NaCl `secretbox` (XSalsa20-Poly1305) with the 24-byte nonce; the Poly1305 tag is part of the ciphertext.
+- **Passphrase / MIME / filename** — never sent to the server; they live only in the URL fragment (`#;;;passphrase;;;mime;;;filename`).
 
-The passphrase, MIME type, and filename live only client-side; the server stores neither them nor any plaintext.
+## License
 
-### Performance Characteristics
-- **Cold start:** ~50ms (Cloudflare Workers)
-- **Warm requests:** ~10ms globally
-- **KV read latency:** ~10ms from cache, ~100ms from origin
-- **Global propagation:** ~60 seconds for KV writes
+**CC0 — No Rights Reserved.** Fork it, hack it, deploy it everywhere.
 
----
+- 📄 [Source](https://github.com/getpost-loves-you/getpost) · 🚀 [Setup](SETUP.md) · 🐛 [Issues](https://github.com/getpost-loves-you/getpost/issues)
 
-*"Because I love you, I included credentials for anyone to deploy to staging.getpost.workers.dev. Be excellent to one another!"*
+GetPost revives the spirit of personal file servers from the pre-GitHub era, when sharing a file meant SCPing it to your homepage — now globally distributed, zero-maintenance, free, and encrypted before it leaves your hands.
+
+*Because I love you, shared staging credentials are included so anyone can try a deploy. Be excellent to one another. o7*
