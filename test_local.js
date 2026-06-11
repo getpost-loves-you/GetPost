@@ -156,6 +156,23 @@ async function test(name, fn) {
     assert.deepStrictEqual(Object.keys(shared), ["Cache-Control"]);
   });
 
+  console.log("[rendered page integrity]");
+
+  await test("served viewer page script is valid JS (catches template-literal escape eating)", () => {
+    // render a real page and syntax-check its embedded <script>. the worker embeds
+    // getpost.html inside a backtick template literal, which silently eats JS
+    // backslash escapes - this would have caught the '\n'/'\.' breakage.
+    const [html] = sandbox.generateHtmlBasedOnType(
+      new TextEncoder().encode("x").buffer,
+      new URL("https://t.local/post?key=X"), { permanent: true }, null);
+    const scripts = html.match(/<script>([\s\S]*?)<\/script>/g);
+    const inline = scripts[scripts.length - 1].replace(/<\/?script>/g, "")
+      // the ${injectorScript} placeholder is the only unresolved interpolation here
+      .replace(/\n\s*;\s*$/, "");
+    // throws SyntaxError if the packed script is malformed
+    new vm.Script(inline);
+  });
+
   console.log("[type detection]");
 
   const detect = (bytes) =>

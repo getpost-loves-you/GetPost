@@ -50,6 +50,20 @@ for fragment in re.findall(rb"`AUTOINSERT\w+`", INPUT_JS):
                 .replace(b"`", b"\\`")
                 .replace(b"${", b"\\${")
         )
+    # html deps are spliced raw into a `backtick template literal`, which silently
+    # eats JS backslash escapes (\n, \., \d ...) in both code AND comments. only \`
+    # (escaped backtick) and \$ (escaped interpolation) are legal there; anything
+    # else is almost certainly a bug that would ship broken JS - fail loudly instead.
+    if re.match(rb".+\.html", file_name):
+        for m in re.finditer(rb"\\(.)", file_substitution):
+            if m.group(1) not in (b"`", b"$"):
+                line = file_substitution[: m.start()].count(b"\n") + 1
+                raise ValueError(
+                    f"{file_name.decode()}:{line}: stray backslash escape "
+                    f"'\\{chr(m.group(1)[0])}' in an embedded HTML dep. The backtick "
+                    f"template literal will consume it - rewrite without the escape "
+                    f"(e.g. String.fromCharCode(10) for a newline, lastIndexOf for a dot)."
+                )
     # include base64 strings from files in CSS
     if re.match(rb".+\.css", file_name):
         """
