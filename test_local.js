@@ -55,12 +55,35 @@ function makeNamespace() {
   };
 }
 
-function call(method, path, opts = {}) {
+// mock CacheStorage matching the subset of the Cache API the worker uses
+function makeCacheStorage() {
+  const store = new Map();
+  return {
+    store,
+    default: {
+      async match(request) {
+        const entry = store.get(request.url);
+        return entry ? entry.clone() : undefined;
+      },
+      async put(request, response) {
+        store.set(request.url, response);
+      },
+      async delete(urlOrRequest) {
+        return store.delete(typeof urlOrRequest === "string" ? urlOrRequest : urlOrRequest.url);
+      },
+    },
+  };
+}
+
+async function call(method, path, opts = {}) {
   const init = { method };
   if (opts.body !== undefined) init.body = opts.body;
   if (opts.headers) init.headers = opts.headers;
   const request = new Request("https://test.local" + path, init);
-  return sandbox.HANDLER({ request });
+  const pending = [];
+  const response = await sandbox.HANDLER({ request, waitUntil: (p) => pending.push(p) });
+  await Promise.all(pending);
+  return response;
 }
 
 async function uploadJson(body, headers = {}) {
@@ -191,6 +214,7 @@ async function test(name, fn) {
   console.log("[handler: upload]");
 
   sandbox.NAMESPACE = makeNamespace();
+  sandbox.caches = makeCacheStorage();
 
   await test("upload returns json links and stores content", async () => {
     const json = await uploadJson("hello world");
@@ -316,6 +340,34 @@ async function test(name, fn) {
     const resp = await call("POST", "/post?key=" + key + "&del=" + legacyDel);
     assert.strictEqual(resp.status, 200);
     assert.ok(!sandbox.NAMESPACE.store.has(key));
+  });
+
+  console.log("[edge cache]");
+
+  await test("repeat view served from edge cache without KV", async () => {
+    const json = await uploadJson("cache hit test");
+    assert.strictEqual((await call("GET", "/post?key=" + json.key)).status, 200);
+    // remove from KV to prove the second view comes from the cache
+    sandbox.NAMESPACE.store.delete(json.key);
+    const second = await call("GET", "/post?key=" + json.key);
+    assert.strictEqual(second.status, 200);
+    assert.ok((await second.text()).includes("cache hit test"));
+  });
+
+  await test("delete purges this PoP's cached copies", async () => {
+    const json = await uploadJson("purge me");
+    await call("GET", "/post?key=" + json.key);
+    await call("GET", "/post?key=" + json.key + "&raw");
+    const resp = await call("POST", "/post" + new URL(json.delete_url).search);
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual((await call("GET", "/post?key=" + json.key)).status, 404);
+    assert.strictEqual((await call("GET", "/post?key=" + json.key + "&raw")).status, 404);
+  });
+
+  await test("HEAD does not populate the edge cache", async () => {
+    const json = await uploadJson("head no cache");
+    await call("HEAD", "/post?key=" + json.key);
+    assert.ok(!sandbox.caches.store.has("https://test.local/post?key=" + json.key));
   });
 
   console.log("[handler: methods, pages, cors]");
