@@ -2117,6 +2117,16 @@ body {
 .decrypt-status.success { color: #48bb78; }
 .decrypt-status.info { color: #888; }
 
+.download-encrypted {
+    display: block;
+    margin-top: 1rem;
+    font-size: 11px;
+    color: #555;
+    text-decoration: none;
+}
+
+.download-encrypted:hover { color: #888; }
+
 .hidden {
     display: none !important;
 }
@@ -2205,6 +2215,7 @@ body {
             </div>
             <button class="decrypt-button" id="decryptButton" onclick="decryptContent()">decrypt</button>
             <div class="decrypt-status" id="decryptStatus"></div>
+            <a class="download-encrypted" id="downloadEncrypted" download="encrypted.gpe1">download encrypted contents</a>
         </div>
     </div>
 
@@ -2283,6 +2294,9 @@ body {
         document.getElementById('content').classList.add('hidden');
         document.getElementById('markdownContent').classList.add('hidden');
         document.getElementById('encryptedNotice').classList.remove('hidden');
+        // let people save the still-encrypted container without the passphrase
+        document.getElementById('downloadEncrypted').href =
+            window.location.href.split('#')[0] + '&raw';
     }
 
     function showStatus(message, type) {
