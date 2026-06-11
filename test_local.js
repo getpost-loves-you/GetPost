@@ -166,9 +166,9 @@ async function test(name, fn) {
     assert.strictEqual(type, "application/x-encrypted");
   });
 
-  await test("legacy bare-0x00 container detected as encrypted", () => {
+  await test("bare 0x00 (no GPE1) is not treated as encrypted", () => {
     const [, type] = detect([0, 9, 9, 9, 9, 9, 9, 9, 9]);
-    assert.strictEqual(type, "application/x-encrypted");
+    assert.notStrictEqual(type, "application/x-encrypted");
   });
 
   await test("mp42 not mistaken for encrypted, page redirects", () => {
@@ -179,14 +179,6 @@ async function test(name, fn) {
     assert.ok(html.includes("window.location.assign"));
   });
 
-  await test("zero-leading non-mp42 binary does not fall through to pdf", () => {
-    const [, type] = sandbox.generateHtmlBasedOnType(
-      // bare 0x00 marker is assumed legacy-encrypted, never pdf
-      Uint8Array.from([0, 0, 0, 0x18, 65, 65, 65, 65, 65, 65, 65, 65]).buffer,
-      new URL("https://t.local/post?key=X"), null, null);
-    assert.notStrictEqual(type, "application/pdf");
-  });
-
   await test("png magic detected", () => {
     const [, type] = detect([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     assert.strictEqual(type, "image/png");
@@ -195,6 +187,32 @@ async function test(name, fn) {
   await test("pdf magic detected", () => {
     const [, type] = detect([0x25, 0x50, 0x44, 0x46, 0x2d]);
     assert.strictEqual(type, "application/pdf");
+  });
+
+  await test("webp detected via RIFF+WEBP, renders inline", () => {
+    const [html, type] = detect([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    assert.strictEqual(type, "image/webp");
+    assert.ok(!html.includes("window.location.assign"));
+  });
+
+  await test("wav detected via RIFF+WAVE, redirects to raw", () => {
+    const [html, type] = detect([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]);
+    assert.strictEqual(type, "audio/wav");
+    assert.ok(html.includes("window.location.assign"));
+  });
+
+  await test("webm, ogg, flac magics detected", () => {
+    assert.strictEqual(detect([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4])[1], "video/webm");
+    assert.strictEqual(detect([0x4f, 0x67, 0x67, 0x53, 1, 2, 3, 4])[1], "audio/ogg");
+    assert.strictEqual(detect([0x66, 0x4c, 0x61, 0x43, 1, 2, 3, 4])[1], "audio/flac");
+  });
+
+  await test("svg detected and rendered inline (not as markdown)", () => {
+    const svg = (s) => detect(Array.from(new TextEncoder().encode(s)));
+    assert.strictEqual(svg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')[1], "image/svg+xml");
+    assert.strictEqual(svg('<?xml version="1.0"?>\n<svg></svg>')[1], "image/svg+xml");
+    // a markdown doc that merely mentions svg stays text
+    assert.strictEqual(svg("# my svg notes")[1], "text/raw; charset=UTF-8");
   });
 
   await test("plain text rendered as markdown", () => {
@@ -332,16 +350,6 @@ async function test(name, fn) {
     assert.strictEqual((await call("GET", "/post?key=tooshort")).status, 404);
   });
 
-  await test("legacy post (no metadata) strips appended delete key", async () => {
-    const legacyDel = "B".repeat(26);
-    const value = new TextEncoder().encode("legacy content" + legacyDel).buffer;
-    const key = "C".repeat(26);
-    sandbox.NAMESPACE.store.set(key, { value, opts: {} });
-    const html = await (await call("GET", "/post?key=" + key)).text();
-    assert.ok(html.includes("legacy content"));
-    assert.ok(!html.includes(legacyDel));
-  });
-
   console.log("[handler: delete]");
 
   await test("GET delete link returns confirmation, content survives", async () => {
@@ -366,18 +374,6 @@ async function test(name, fn) {
     const resp = await call("POST", "/post" + del);
     assert.strictEqual(resp.status, 200);
     assert.ok(!sandbox.NAMESPACE.store.has(json.key), "deleted");
-  });
-
-  await test("legacy post deletable via appended key", async () => {
-    const legacyDel = "D".repeat(26);
-    const key = "E".repeat(26);
-    sandbox.NAMESPACE.store.set(key, {
-      value: new TextEncoder().encode("legacy" + legacyDel).buffer,
-      opts: {},
-    });
-    const resp = await call("POST", "/post?key=" + key + "&del=" + legacyDel);
-    assert.strictEqual(resp.status, 200);
-    assert.ok(!sandbox.NAMESPACE.store.has(key));
   });
 
   console.log("[edge cache]");

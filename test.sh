@@ -83,6 +83,11 @@ assert_eq "mp42 magic detected, not mistaken for encrypted" "$(content_type "$(e
 mp4_page=$(curl -s "$(echo "$mp4_json" | jq -r .share_url)")
 assert_contains "mp4 page redirects to raw" "$mp4_page" "window.location.assign"
 
+webp_json=$(printf 'RIFF\x00\x00\x00\x00WEBPfake' | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
+assert_eq "webp magic detected" "$(content_type "$(echo "$webp_json" | jq -r .raw_url)")" "image/webp"
+svg_json=$(printf '<svg xmlns="http://www.w3.org/2000/svg"></svg>' | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
+assert_eq "svg detected" "$(content_type "$(echo "$svg_json" | jq -r .raw_url)")" "image/svg+xml"
+
 echo "[encryption]"
 if python3 -c "import nacl" 2>/dev/null; then
     enc_share_url=$(echo -n "round trip test" | PASTEBIN="$BASE" PASTEBIN_PASSWORD="test-passphrase" ./pastebin-crypted.py 2>/dev/null | tail -n1)
