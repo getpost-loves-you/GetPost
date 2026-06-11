@@ -116,20 +116,17 @@ This script:
 ./test.sh mydomain
 ```
 
-Expected output:
+Expected output (each assertion prints `PASS`/`FAIL`, ending with a summary):
 ```
 Running tests against: https://your-domain.workers.dev
+[upload + content negotiation]
+  PASS  json response has share_url
+  ...
 ==================================
-TEST RESULTS:
-==================================
-IMAGE: ✅ PASS
-RENDERED: ✅ PASS
-UPLOAD: ✅ PASS
-
-🎉 ALL TESTS PASSED!
+ALL TESTS PASSED (47 passed, 1 skipped)
 ```
 
-If tests fail on first run, that's normal! The script will generate baseline hashes for your content.
+The encryption checks skip gracefully if PyNaCl isn't installed. You can also run the offline unit tests without deploying: `node test_local.js`.
 
 ## Step 4: Customization (Optional)
 
@@ -143,10 +140,10 @@ If you want to use your own domain instead of `*.workers.dev`:
 ### Modify the Code
 GetPost is designed to be hackable! Try editing:
 
-- **`deps/getpost.css`** - Change colors, fonts, layout
-- **`deps/upload.html`** - Modify the upload page content
-- **`worker.js`** - Add features, change behavior
-- **`deps/getpost.html`** - Customize the content display template
+- **`deps/upload.html`** - the upload page (styles are inline in its `<style>` block)
+- **`deps/getpost.html`** - the content viewer / decrypt page
+- **`deps/about.html`** - the about / help page
+- **`worker.js`** - request handling, routes, MIME detection
 
 After changes, redeploy and test:
 ```bash
@@ -160,17 +157,18 @@ After changes, redeploy and test:
 To keep the main `worker.js` file manageable, we use a simple build system:
 
 1. **`autoinsert.py`** scans `worker.js` for `AUTOINSERT_` markers
-2. **Embeds files** from `deps/` directory using naming convention:
-   - `AUTOINSERT_GETPOST__CSS` → `deps/getpost.css`
+2. **Embeds files** from `deps/` by naming convention:
    - `AUTOINSERT_UPLOAD__HTML` → `deps/upload.html`
-3. **Creates `worker.packed.js`** with all dependencies bundled
+   - `AUTOINSERT_GETPOST__HTML` → `deps/getpost.html`
+   - base64 library blobs (NaCl, Argon2, marked, QR) inline the same way
+3. **Creates `worker.packed.js`** with everything bundled
 4. **`deploy.sh`** uploads the packed file to Cloudflare
 
+> Embedded HTML is spliced into a JS backtick template literal, so `autoinsert.py` rejects stray backslash escapes in those files at build time (they'd otherwise be silently eaten).
+
 ### Testing System
-- **Hash-based validation:** Each test generates a hash of the response
-- **Baseline comparison:** Compares against known-good hashes in your config file
-- **Content filtering:** Removes dynamic content (ULIDs, timestamps) before hashing
-- **Automatic updates:** Generates new baselines when content changes
+- **`test_local.js`** — offline: loads the packed worker into a sandbox with a mock KV namespace and asserts behavior directly. No deploy needed.
+- **`test.sh`** — online: fires real requests at a live deployment and asserts the responses, including an encrypted round trip. Each check prints PASS/FAIL.
 
 ## Troubleshooting
 
@@ -186,10 +184,9 @@ To keep the main `worker.js` file manageable, we use a simple build system:
 - Variable name must be exactly `NAMESPACE`
 - The namespace itself can have any name
 
-**Tests fail with hash mismatches:**
-- This is normal after content changes
-- Run `./generate_test_hashes.sh mydomain` to update baselines
-- Or manually update the hash values in your `.mydomain` file
+**A test fails:**
+- The output names the failing assertion and shows expected vs. got
+- `node test_local.js` runs the same logic offline if you want to isolate worker behavior from deployment issues
 
 **Deploy succeeds but site doesn't work:**
 - Check the worker logs in Cloudflare dashboard
