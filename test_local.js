@@ -193,7 +193,9 @@ async function test(name, fn) {
     bytes[0] = 0; bytes[1] = 0; bytes[2] = 0; bytes[3] = 0x18;
     const [html, type] = detect(bytes);
     assert.strictEqual(type, "video/mp4");
-    assert.ok(html.includes("window.location.assign"));
+    // match the injector form specifically - the viewer's own countdown code also
+    // contains a window.location.assign call on every page
+    assert.ok(html.includes("window.location.assign(window.location.href"));
   });
 
   await test("png magic detected", () => {
@@ -209,13 +211,13 @@ async function test(name, fn) {
   await test("webp detected via RIFF+WEBP, renders inline", () => {
     const [html, type] = detect([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
     assert.strictEqual(type, "image/webp");
-    assert.ok(!html.includes("window.location.assign"));
+    assert.ok(!html.includes("window.location.assign(window.location.href"));
   });
 
   await test("wav detected via RIFF+WAVE, redirects to raw", () => {
     const [html, type] = detect([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]);
     assert.strictEqual(type, "audio/wav");
-    assert.ok(html.includes("window.location.assign"));
+    assert.ok(html.includes("window.location.assign(window.location.href"));
   });
 
   await test("webm, ogg, flac magics detected", () => {
@@ -230,6 +232,57 @@ async function test(name, fn) {
     assert.strictEqual(svg('<?xml version="1.0"?>\n<svg></svg>')[1], "image/svg+xml");
     // a markdown doc that merely mentions svg stays text
     assert.strictEqual(svg("# my svg notes")[1], "text/raw; charset=UTF-8");
+  });
+
+  const detectText = (s) => detect(Array.from(new TextEncoder().encode(s)));
+
+  await test("single-line http url detected as text/x-url", () => {
+    assert.strictEqual(detectText("https://example.com/some/path?q=1")[1], "text/x-url");
+    assert.strictEqual(detectText("http://example.com/")[1], "text/x-url");
+  });
+
+  await test("url with trailing newline/whitespace still detected", () => {
+    assert.strictEqual(detectText("https://example.com/\n")[1], "text/x-url");
+    assert.strictEqual(detectText("  https://example.com/  \n")[1], "text/x-url");
+  });
+
+  await test("multi-line content starting with a url stays text/markdown", () => {
+    assert.strictEqual(
+      detectText("https://example.com/\nand some more text")[1],
+      "text/raw; charset=UTF-8");
+  });
+
+  await test("non-http scheme (javascript:, ftp:) not treated as url", () => {
+    assert.strictEqual(detectText("javascript:alert(1)")[1], "text/raw; charset=UTF-8");
+    assert.strictEqual(detectText("ftp://example.com/file")[1], "text/raw; charset=UTF-8");
+  });
+
+  await test("url longer than 2048 chars stays text", () => {
+    assert.strictEqual(
+      detectText("https://example.com/" + "a".repeat(2100))[1],
+      "text/raw; charset=UTF-8");
+  });
+
+  await test("encrypted container takes precedence over url detection", () => {
+    const urlBytes = Array.from(new TextEncoder().encode("https://example.com/"));
+    const [, type] = detect([0, 0x47, 0x50, 0x45, 0x31].concat(urlBytes));
+    assert.strictEqual(type, "application/x-encrypted");
+  });
+
+  await test("url viewer page contains countdown hook and no server redirect", () => {
+    const [html, type] = detectText("https://example.com/");
+    assert.strictEqual(type, "text/x-url");
+    assert.ok(html.includes('var payloadType = "text/x-url"'));
+    assert.ok(html.includes('id="redirectNotice"'));
+    assert.ok(html.includes("showRedirectCountdown"));
+    // the injectorScript slot (the lone statement before </script>) must be empty -
+    // the only location.assign on the page is inside showRedirectCountdown itself
+    assert.ok(/\n\s*;\s*<\/script>/.test(html), "injector slot is empty");
+    // and the page script must still be valid JS after template-literal packing
+    const scripts = html.match(/<script>([\s\S]*?)<\/script>/g);
+    const inline = scripts[scripts.length - 1].replace(/<\/?script>/g, "")
+      .replace(/\n\s*;\s*$/, "");
+    new vm.Script(inline);
   });
 
   await test("plain text rendered as markdown", () => {
@@ -382,6 +435,13 @@ async function test(name, fn) {
     const json = await uploadJson(blob);
     const html = await (await call("GET", "/post?key=" + json.key)).text();
     assert.ok(html.includes('var payloadType = "application/x-encrypted"'));
+  });
+
+  await test("uploaded url body served with text/x-url viewer page", async () => {
+    const json = await uploadJson("https://example.com/short/link");
+    const html = await (await call("GET", "/post?key=" + json.key)).text();
+    assert.ok(html.includes('var payloadType = "text/x-url"'));
+    assert.ok(html.includes('id="redirectNotice"'));
   });
 
   await test("unknown key 404, malformed key 404", async () => {
