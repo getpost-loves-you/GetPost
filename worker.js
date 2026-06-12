@@ -595,6 +595,22 @@ function looksLikeSvg(str) {
   return false;
 }
 
+// detect a shortlink: the entire content (trimmed) is one line, at most 2048
+// characters, and parses as a single http/https URL - the viewer page shows a
+// cancellable countdown before redirecting (no server-side redirect)
+function looksLikeUrl(str) {
+  const trimmed = str.trim();
+  if (trimmed.length === 0 || trimmed.length > 2048) return false;
+  if (trimmed.includes("\n") || trimmed.includes("\r")) return false;
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (e) {
+    return false;
+  }
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -692,6 +708,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
         // SVG is XML text; sniff a leading <svg or <?xml ... <svg before treating as markdown
         if (looksLikeSvg(contentAsString)) {
           type = "image/svg+xml";
+        } else if (looksLikeUrl(contentAsString)) {
+          // a bare single-line URL becomes a shortlink with a countdown viewer
+          type = "text/x-url";
         } else {
           type = DEFAULT_MIME_TEXT;
         }
@@ -724,6 +743,11 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "application/zip":
     case "application/octet-stream":
       injectorScript = "window.location.assign(window.location.href+'&raw')";
+      break;
+    case "text/x-url":
+      // NO server-side redirect - the viewer page fetches the raw URL, validates
+      // it, and shows a cancellable countdown before navigating
+      injectorScript = "";
       break;
     case DEFAULT_MIME_TEXT:
     default:
@@ -758,6 +782,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     description = new TextDecoder("utf-8")
       .decode(new Uint8Array(content.slice(0, 140)))
       .replace(/[^0-9a-z\\\ \.\:\?]/gi, "");
+  } else if (type === "text/x-url") {
+    // don't render the URL as page content - the viewer JS owns the display
+    description = "GetPost: redirect";
   } else {
     description = "GetPost: " + type;
   }

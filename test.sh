@@ -81,7 +81,7 @@ assert_eq "png magic detected" "$(content_type "$(echo "$png_json" | jq -r .raw_
 mp4_json=$(printf '\x00\x00\x00\x18ftypmp42fakevideo' | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
 assert_eq "mp42 magic detected, not mistaken for encrypted" "$(content_type "$(echo "$mp4_json" | jq -r .raw_url)")" "video/mp4"
 mp4_page=$(curl -s "$(echo "$mp4_json" | jq -r .share_url)")
-assert_contains "mp4 page redirects to raw" "$mp4_page" "window.location.assign"
+assert_contains "mp4 page redirects to raw" "$mp4_page" "window.location.assign(window.location.href"
 
 webp_json=$(printf 'RIFF\x00\x00\x00\x00WEBPfake' | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
 assert_eq "webp magic detected" "$(content_type "$(echo "$webp_json" | jq -r .raw_url)")" "image/webp"
@@ -92,6 +92,14 @@ code_json=$(printf '# not a heading\ndef f(): pass' | curl -s -H "Accept: applic
 code_key=$(echo "$code_json" | jq -r .key)
 assert_contains "bare text post renders markdown" "$(curl -s "$BASE/post?key=$code_key")" "<h1"
 assert_contains "?lang renders as a code block" "$(curl -s "$BASE/post?key=$code_key&lang=python")" "language-python"
+
+echo "[url shortlink]"
+url_json=$(echo -n "https://example.com/" | curl -s -H "Accept: application/json" --data-binary @- "$BASE/post")
+url_page=$(curl -s "$(echo "$url_json" | jq -r .share_url)")
+assert_contains "url paste typed as text/x-url" "$url_page" 'var payloadType = "text/x-url"'
+assert_contains "url page has countdown element" "$url_page" 'id="redirectNotice"'
+assert_contains "url page wires the countdown" "$url_page" "showRedirectCountdown"
+assert_eq "url raw round trip" "$(curl -s "$(echo "$url_json" | jq -r .raw_url)")" "https://example.com/"
 
 echo "[encryption]"
 if python3 -c "import nacl" 2>/dev/null; then
