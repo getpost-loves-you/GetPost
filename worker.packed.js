@@ -1748,6 +1748,22 @@ function looksLikeSvg(str) {
   return false;
 }
 
+// detect a shortlink: the entire content (trimmed) is one line, at most 2048
+// characters, and parses as a single http/https URL - the viewer page shows a
+// cancellable countdown before redirecting (no server-side redirect)
+function looksLikeUrl(str) {
+  const trimmed = str.trim();
+  if (trimmed.length === 0 || trimmed.length > 2048) return false;
+  if (trimmed.includes("\n") || trimmed.includes("\r")) return false;
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (e) {
+    return false;
+  }
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -1845,6 +1861,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
         // SVG is XML text; sniff a leading <svg or <?xml ... <svg before treating as markdown
         if (looksLikeSvg(contentAsString)) {
           type = "image/svg+xml";
+        } else if (looksLikeUrl(contentAsString)) {
+          // a bare single-line URL becomes a shortlink with a countdown viewer
+          type = "text/x-url";
         } else {
           type = DEFAULT_MIME_TEXT;
         }
@@ -1877,6 +1896,11 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "application/zip":
     case "application/octet-stream":
       injectorScript = "window.location.assign(window.location.href+'&raw')";
+      break;
+    case "text/x-url":
+      // NO server-side redirect - the viewer page fetches the raw URL, validates
+      // it, and shows a cancellable countdown before navigating
+      injectorScript = "";
       break;
     case DEFAULT_MIME_TEXT:
     default:
@@ -1911,6 +1935,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     description = new TextDecoder("utf-8")
       .decode(new Uint8Array(content.slice(0, 140)))
       .replace(/[^0-9a-z\\\ \.\:\?]/gi, "");
+  } else if (type === "text/x-url") {
+    // don't render the URL as page content - the viewer JS owns the display
+    description = "GetPost: redirect";
   } else {
     description = "GetPost: " + type;
   }
@@ -2157,6 +2184,34 @@ body {
     display: none !important;
 }
 
+/* url shortlink countdown */
+#redirectNotice .redirect-dest {
+    margin-bottom: 1rem;
+    overflow-wrap: anywhere;
+}
+
+#redirectNotice .redirect-dest a {
+    color: #48bb78;
+    text-decoration: underline;
+    text-decoration-color: #2d7a4d;
+}
+
+#redirectNotice .redirect-dest a:hover { text-decoration-color: #48bb78; }
+
+#redirectNotice .redirect-count {
+    color: #888;
+    margin-bottom: 1rem;
+}
+
+#redirectNotice .redirect-go {
+    display: block;
+    margin-bottom: 1rem;
+    color: #48bb78;
+    text-decoration: none;
+}
+
+#redirectNotice .redirect-go:hover { text-decoration: underline; }
+
 #decryptedContent {
     margin-top: 0;
 }
@@ -2245,6 +2300,16 @@ body {
         </div>
     </div>
 
+    <div id="redirectNotice" class="hidden">
+        <div class="decrypt-interface">
+            <div class="heading">redirecting to</div>
+            <div class="redirect-dest"><a id="redirectLink" rel="noopener noreferrer"></a></div>
+            <div class="redirect-count" id="redirectCount"></div>
+            <a class="redirect-go" id="redirectGo" rel="noopener noreferrer">go now</a>
+            <button class="decrypt-button" id="redirectCancel" onclick="cancelRedirect()">cancel</button>
+        </div>
+    </div>
+
     <div id="content">
         <img id="imgContent" src="${imageUrl}">
     </div>
@@ -2313,6 +2378,94 @@ body {
         if (runs) for (var i = 0; i < runs.length; i++) longest = Math.max(longest, runs[i].length);
         var fence = '\`'.repeat(Math.max(3, longest + 1));
         return fence + lang + NL + text + NL + fence;
+    }
+
+    // --- url shortlink countdown ---
+    // a paste whose entire content is one http/https URL acts as a shortlink:
+    // the viewer shows the destination plus a cancellable 5 second countdown.
+    var redirectTimer = null;
+    var CR = String.fromCharCode(13);
+
+    // same rule the server uses: single line, at most 2048 chars, http/https only
+    function isValidRedirectUrl(s) {
+        if (!s || s.length > 2048) return false;
+        if (s.indexOf(NL) !== -1 || s.indexOf(CR) !== -1) return false;
+        if (s.indexOf('http://') !== 0 && s.indexOf('https://') !== 0) return false;
+        try {
+            var parsed = new URL(s);
+            return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // show the destination text inertly (no link, no redirect) when validation fails
+    function showInertText(text) {
+        var md = document.getElementById('markdownContent');
+        md.classList.remove('hidden');
+        md.textContent = text;
+    }
+
+    function showRedirectCountdown(destUrl) {
+        if (!isValidRedirectUrl(destUrl)) {
+            showInertText(destUrl);
+            return;
+        }
+        document.getElementById('content').classList.add('hidden');
+        document.getElementById('markdownContent').classList.add('hidden');
+        document.getElementById('redirectNotice').classList.remove('hidden');
+        // attacker-controlled URL: only ever textContent / setAttribute, never innerHTML
+        var link = document.getElementById('redirectLink');
+        link.textContent = destUrl;
+        link.setAttribute('href', destUrl);
+        document.getElementById('redirectGo').setAttribute('href', destUrl);
+        var count = document.getElementById('redirectCount');
+        var remaining = 5;
+        count.textContent = 'redirecting in ' + remaining + 's';
+        redirectTimer = setInterval(function() {
+            remaining = remaining - 1;
+            if (remaining <= 0) {
+                clearInterval(redirectTimer);
+                redirectTimer = null;
+                window.location.assign(destUrl);
+            } else {
+                count.textContent = 'redirecting in ' + remaining + 's';
+            }
+        }, 1000);
+    }
+
+    function cancelRedirect() {
+        if (redirectTimer) {
+            clearInterval(redirectTimer);
+            redirectTimer = null;
+        }
+        document.getElementById('redirectCount').textContent = 'cancelled';
+    }
+
+    // server typed the payload as text/x-url: fetch the raw text, validate it
+    // client-side, and start the countdown (or show it inertly if invalid)
+    async function checkIfUrlRedirect() {
+        if (payloadType !== 'text/x-url') return false;
+        try {
+            var rawUrl = window.location.href.split('#')[0] + '&raw';
+            var response = await fetch(rawUrl, {
+                mode: 'cors',
+                credentials: 'omit',
+                referrerPolicy: 'no-referrer',
+                cache: 'no-cache'
+            });
+            if (!response.ok) return false;
+            var text = (await response.text()).trim();
+            if (isValidRedirectUrl(text)) {
+                showRedirectCountdown(text);
+            } else {
+                showInertText(text);
+            }
+            return true;
+        } catch (error) {
+            console.error('Error checking url redirect:', error);
+            return false;
+        }
     }
 
     async function checkIfEncrypted() {
@@ -2473,11 +2626,19 @@ body {
 
     function displayDecryptedContent(decryptedData) {
         var decryptedDiv = document.getElementById('decryptedContent');
+        var dataString = new TextDecoder('utf-8').decode(decryptedData);
+
+        // encrypted shortlink: a decrypted payload that is just a single-line
+        // http/https URL gets the same countdown redirect as a plaintext one
+        if (isValidRedirectUrl(dataString.trim())) {
+            showRedirectCountdown(dataString.trim());
+            return;
+        }
+
         decryptedDiv.classList.remove('hidden');
 
         showDownloadBar(decryptedData);
 
-        var dataString = new TextDecoder('utf-8').decode(decryptedData);
         var isPrintable = true;
         for (var i = 0; i < Math.min(dataString.length, 1000); i++) {
             var code = dataString.charCodeAt(i);
@@ -2548,6 +2709,16 @@ body {
     }
 
     window.addEventListener('load', async function() {
+        // the url shortlink path needs no crypto libs - run it before the guard
+        if (payloadType === 'text/x-url') {
+            try {
+                await checkIfUrlRedirect();
+            } catch (error) {
+                console.error('Failed url redirect check:', error);
+            }
+            return;
+        }
+
         if (typeof nacl === 'undefined' || typeof argon2 === 'undefined') {
             console.error('Crypto libraries failed to load');
             showStatus('failed to load encryption libraries — refresh the page', 'error');
