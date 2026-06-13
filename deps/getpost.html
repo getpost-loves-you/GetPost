@@ -433,6 +433,17 @@ body {
         return fence + lang + NL + text + NL + fence;
     }
 
+    // build the raw-bytes URL for the current page: /post?key=... pages already
+    // carry a query string so the raw flag joins with an ampersand, while named
+    // /x/name pages have a bare path and need a question mark instead
+    function rawUrlOfPage() {
+        var base = window.location.href.split('#')[0];
+        if (window.location.search) {
+            return base + '&raw';
+        }
+        return base + '?raw';
+    }
+
     // --- url shortlink countdown ---
     // a paste whose entire content is one http/https URL acts as a shortlink:
     // the viewer shows the destination plus a cancellable 5 second countdown.
@@ -500,7 +511,7 @@ body {
     async function checkIfUrlRedirect() {
         if (payloadType !== 'text/x-url') return false;
         try {
-            var rawUrl = window.location.href.split('#')[0] + '&raw';
+            var rawUrl = rawUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -525,7 +536,7 @@ body {
         // the server already typed the payload - only refetch the raw bytes when it's encrypted
         if (payloadType !== 'application/x-encrypted') return false;
         try {
-            var rawUrl = window.location.href.split('#')[0] + '&raw';
+            var rawUrl = rawUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -575,8 +586,7 @@ body {
         document.getElementById('markdownContent').classList.add('hidden');
         document.getElementById('encryptedNotice').classList.remove('hidden');
         // let people save the still-encrypted container without the passphrase
-        document.getElementById('downloadEncrypted').href =
-            window.location.href.split('#')[0] + '&raw';
+        document.getElementById('downloadEncrypted').href = rawUrlOfPage();
     }
 
     function showStatus(message, type) {
@@ -677,6 +687,24 @@ body {
         bar.classList.add('active');
     }
 
+    // fragment carry-forward: when this page was opened with a fragment (which
+    // carries the passphrase for an encrypted paste), copy that fragment onto any
+    // same-origin /x/ links inside the rendered content that have no fragment of
+    // their own - this lets one passphrase flow across a set of encrypted /x/
+    // pastes that link to each other (e2ee blog navigation). it applies ONLY to
+    // /x/ links on this same origin; everything else is left untouched.
+    function carryFragmentForward(container) {
+        if (!window.location.hash) return;
+        var anchors = container.querySelectorAll('a');
+        for (var i = 0; i < anchors.length; i++) {
+            var anchor = anchors[i];
+            if (anchor.origin !== window.location.origin) continue;
+            if (anchor.pathname.indexOf('/x/') !== 0) continue;
+            if (anchor.hash) continue;
+            anchor.hash = window.location.hash;
+        }
+    }
+
     function displayDecryptedContent(decryptedData) {
         var decryptedDiv = document.getElementById('decryptedContent');
         var dataString = new TextDecoder('utf-8').decode(decryptedData);
@@ -716,6 +744,7 @@ body {
                 decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
                     dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
             }
+            carryFragmentForward(decryptedDiv);
         } else {
             var mimeType = originalMimeType || 'application/octet-stream';
             var blob = new Blob([decryptedData], { type: mimeType });

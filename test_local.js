@@ -503,6 +503,233 @@ async function test(name, fn) {
     assert.ok(!sandbox.caches.store.has("https://test.local/post?key=" + json.key));
   });
 
+  console.log("[named pastes]");
+
+  // POST a named paste with the operator secret, returning the parsed response
+  async function postNamed(name, body, headers = {}) {
+    return call("POST", "/x/" + name, {
+      body,
+      headers: Object.assign(
+        { Accept: "application/json", Authorization: "named-secret" },
+        headers
+      ),
+    });
+  }
+
+  await test("named-paste writes 403 when NAMED_KEY is unbound", async () => {
+    // NAMED_KEY unset: feature disabled, even a "correct-looking" auth fails
+    assert.strictEqual(
+      (await call("POST", "/x/blog", { body: "x", headers: { Authorization: "anything" } })).status,
+      403);
+    assert.strictEqual(
+      (await call("DELETE", "/x/blog", { headers: { Authorization: "anything" } })).status,
+      403);
+  });
+
+  await test("named-paste wrong/missing auth 401, GET stays public", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      assert.strictEqual((await call("POST", "/x/auth-test", { body: "x" })).status, 401);
+      assert.strictEqual(
+        (await call("POST", "/x/auth-test", { body: "x", headers: { Authorization: "wrong" } })).status,
+        401);
+      assert.strictEqual((await call("DELETE", "/x/auth-test", { headers: { Authorization: "wrong" } })).status, 401);
+      // a real create, then an unauthenticated public read
+      assert.strictEqual((await postNamed("auth-test", "public read")).status, 200);
+      const page = await call("GET", "/x/auth-test");
+      assert.strictEqual(page.status, 200);
+      assert.ok((await page.text()).includes("public read"));
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("create named paste: permanent metadata, no edit/del keys, json fields", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      const resp = await postNamed("notes.v1", "named content");
+      assert.strictEqual(resp.status, 200);
+      const json = await resp.json();
+      assert.strictEqual(json.share_url, "https://test.local/x/notes.v1");
+      assert.strictEqual(json.raw_url, "https://test.local/x/notes.v1?raw");
+      assert.strictEqual(json.size, 13);
+      assert.strictEqual(json.expires_at, "never");
+      const entry = sandbox.NAMESPACE.store.get("_X_notes.v1");
+      assert.ok(entry, "stored under the _X_ prefix");
+      assert.strictEqual(entry.opts.expirationTtl, undefined, "no expirationTtl");
+      assert.strictEqual(entry.opts.metadata.permanent, true);
+      assert.strictEqual(entry.opts.metadata.edit, undefined, "no edit key minted");
+      assert.strictEqual(entry.opts.metadata.del, undefined, "no del key minted");
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("numeric X-TTL honored (and clamped) on named paste, garbage stays permanent", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      await postNamed("ttl-test", "x", { "X-TTL": "3600" });
+      let opts = sandbox.NAMESPACE.store.get("_X_ttl-test").opts;
+      assert.strictEqual(opts.expirationTtl, 3600);
+      assert.ok(!opts.metadata.permanent);
+      assert.ok(opts.metadata.expiry.includes("T"));
+      await postNamed("ttl-clamp", "x", { "X-TTL": "30" });
+      assert.strictEqual(sandbox.NAMESPACE.store.get("_X_ttl-clamp").opts.expirationTtl, 60);
+      await postNamed("ttl-garbage", "x", { "X-TTL": "banana" });
+      opts = sandbox.NAMESPACE.store.get("_X_ttl-garbage").opts;
+      assert.strictEqual(opts.expirationTtl, undefined);
+      assert.strictEqual(opts.metadata.permanent, true);
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("duplicate POST 409 keeps original; X-I-Really-Mean-It overwrites + purges cache", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      assert.strictEqual((await postNamed("dup", "original")).status, 200);
+      // populate the edge cache with the original page and raw bytes
+      await call("GET", "/x/dup");
+      await call("GET", "/x/dup?raw");
+      assert.ok(sandbox.caches.store.has("https://test.local/x/dup"));
+      assert.ok(sandbox.caches.store.has("https://test.local/x/dup?raw"));
+      // plain duplicate is refused and changes nothing
+      const dup = await postNamed("dup", "clobber attempt");
+      assert.strictEqual(dup.status, 409);
+      assert.ok((await dup.text()).includes("X-I-Really-Mean-It"));
+      assert.strictEqual((await (await call("GET", "/x/dup?raw")).text()), "original");
+      // explicit overwrite succeeds and the stale cached copies are purged
+      const ow = await postNamed("dup", "overwritten", { "X-I-Really-Mean-It": "yes" });
+      assert.strictEqual(ow.status, 200);
+      assert.ok((await ow.json()).message.includes("overwrote"));
+      assert.strictEqual((await (await call("GET", "/x/dup?raw")).text()), "overwritten");
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("named paste GET renders the viewer (markdown case)", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      await postNamed("md-page", "# named heading");
+      const html = await (await call("GET", "/x/md-page")).text();
+      assert.ok(html.includes('var payloadType = "text/raw'));
+      assert.ok(html.includes("<h1"));
+      assert.ok(html.includes("Never (permanent)"));
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("named paste ?raw round-trips exact bytes", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      const body = Uint8Array.from([1, 2, 3, 250, 251]);
+      await postNamed("raw-bytes", body);
+      const resp = await call("GET", "/x/raw-bytes?raw");
+      assert.deepStrictEqual(new Uint8Array(await resp.arrayBuffer()), body);
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("encrypted named paste flagged for the viewer", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      const blob = new Uint8Array(50);
+      blob.set([0, 0x47, 0x50, 0x45, 0x31], 0);
+      await postNamed("enc-page", blob);
+      const html = await (await call("GET", "/x/enc-page")).text();
+      assert.ok(html.includes('var payloadType = "application/x-encrypted"'));
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("url named paste gets the text/x-url countdown viewer", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      await postNamed("shortlink", "https://example.com/dest");
+      const html = await (await call("GET", "/x/shortlink")).text();
+      assert.ok(html.includes('var payloadType = "text/x-url"'));
+      assert.ok(html.includes('id="redirectNotice"'));
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("invalid names 404 for GET and POST", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      const bad = ["/x/", "/x/a/b", "/x/.leading-dot", "/x/" + "a".repeat(65), "/x/sp%20ace"];
+      for (const path of bad) {
+        assert.strictEqual((await call("GET", path)).status, 404, "GET " + path);
+        assert.strictEqual(
+          (await call("POST", path, { body: "x", headers: { Authorization: "named-secret" } })).status,
+          404, "POST " + path);
+      }
+      assert.strictEqual((await call("GET", "/x")).status, 404);
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("DELETE named paste: auth required, deletes, purges cache, missing 404", async () => {
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      await postNamed("doomed", "delete me");
+      await call("GET", "/x/doomed");
+      await call("GET", "/x/doomed?raw");
+      assert.strictEqual((await call("DELETE", "/x/doomed")).status, 401, "auth required");
+      const resp = await call("DELETE", "/x/doomed", { headers: { Authorization: "named-secret" } });
+      assert.strictEqual(resp.status, 200);
+      assert.ok(!sandbox.NAMESPACE.store.has("_X_doomed"), "removed from KV");
+      // cached copies purged: subsequent reads 404 instead of serving stale
+      assert.strictEqual((await call("GET", "/x/doomed")).status, 404);
+      assert.strictEqual((await call("GET", "/x/doomed?raw")).status, 404);
+      // deleting something that never existed
+      assert.strictEqual(
+        (await call("DELETE", "/x/never-was", { headers: { Authorization: "named-secret" } })).status,
+        404);
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("viewer builds ?raw (not &raw) for query-less /x/ pages, script stays valid JS", () => {
+    // render a page as a /x/ path (no query string) and check the raw-url helper
+    const [html] = sandbox.generateHtmlBasedOnType(
+      new TextEncoder().encode("# x").buffer,
+      new URL("https://t.local/x/page"), { permanent: true }, null);
+    assert.ok(html.includes("function rawUrlOfPage"), "raw-url helper present");
+    assert.ok(html.includes("'?raw'"), "helper has the no-query branch");
+    assert.ok(html.includes("'&raw'"), "helper keeps the query-page branch");
+    // the binary-redirect injector must use the same conditional construction
+    const [mp4Html] = sandbox.generateHtmlBasedOnType(
+      Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]).buffer,
+      new URL("https://t.local/x/vid"), null, null);
+    assert.ok(mp4Html.includes("window.location.search?'&raw':'?raw'"), "injector handles both forms");
+    // and the page script must still be valid JS after template-literal packing
+    const scripts = html.match(/<script>([\s\S]*?)<\/script>/g);
+    const inline = scripts[scripts.length - 1].replace(/<\/?script>/g, "")
+      .replace(/\n\s*;\s*$/, "");
+    new vm.Script(inline);
+  });
+
+  await test("fragment carry-forward script targets same-origin /x/ links only", () => {
+    const [html] = sandbox.generateHtmlBasedOnType(
+      new TextEncoder().encode("x").buffer,
+      new URL("https://t.local/x/page"), { permanent: true }, null);
+    assert.ok(html.includes("function carryFragmentForward"), "carry-forward helper present");
+    assert.ok(html.includes("carryFragmentForward(decryptedDiv)"), "wired into decrypted render");
+    assert.ok(html.includes("indexOf('/x/')"), "restricted to /x/ paths");
+    assert.ok(html.includes("window.location.origin"), "restricted to same origin");
+    const scripts = html.match(/<script>([\s\S]*?)<\/script>/g);
+    const inline = scripts[scripts.length - 1].replace(/<\/?script>/g, "")
+      .replace(/\n\s*;\s*$/, "");
+    new vm.Script(inline);
+  });
+
   console.log("[handler: methods, pages, cors]");
 
   await test("HEAD served via GET path", async () => {

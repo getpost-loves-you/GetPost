@@ -37,6 +37,12 @@ if [ ! -z "${KV_NAMESPACE_NAME:-}" ]; then
         echo "  - PERMANENT_KEY binding enabled (permalinks unlocked for the operator)"
     fi
 
+    # Optional operator secret that unlocks named pastes at /x/<name> (see NAMED_KEY in worker.js)
+    if [ -n "${NAMED_KEY:-}" ]; then
+        EXTRA_BINDINGS="$EXTRA_BINDINGS$(printf ',\n    { "name": "NAMED_KEY", "type": "secret_text", "text": "%s" }' "$NAMED_KEY")"
+        echo "  - NAMED_KEY binding enabled (named pastes at /x/ unlocked for the operator)"
+    fi
+
     # Upload worker with KV binding (service worker format)
     echo "► Uploading worker script '$SCRIPT_NAME' with KV binding..."
     METADATA=$(cat <<EOF
