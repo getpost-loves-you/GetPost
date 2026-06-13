@@ -156,6 +156,40 @@ fi
 assert_eq "oversize upload 413" "$(dd if=/dev/zero bs=1048576 count=11 2>/dev/null | http_code --data-binary @- "$BASE/post")" "413"
 assert_eq "invalid content_type 400" "$(http_code "${raw_url}&content_type=not_a_mime")" "400"
 
+echo "[named pastes]"
+if [ -n "${NAMED_KEY:-}" ]; then
+    xname="testx-$RANDOM$RANDOM"
+    assert_eq "named write without auth 401" "$(echo -n "x" | http_code --data-binary @- "$BASE/x/$xname")" "401"
+    assert_eq "named write with wrong auth 401" "$(echo -n "x" | http_code -H "Authorization: not-the-key" --data-binary @- "$BASE/x/$xname")" "401"
+    x_json=$(printf '# named heading\n\nbody' | curl -s -H "Accept: application/json" -H "Authorization: $NAMED_KEY" --data-binary @- "$BASE/x/$xname")
+    assert_contains "named paste json has share_url" "$(echo "$x_json" | jq -r .share_url)" "/x/$xname"
+    assert_contains "named paste json has raw_url" "$(echo "$x_json" | jq -r .raw_url)" "/x/$xname?raw"
+    assert_eq "named paste permanent by default" "$(echo "$x_json" | jq -r .expires_at)" "never"
+    x_page=$(curl -s "$BASE/x/$xname")
+    assert_contains "named paste page renders markdown" "$x_page" "<h1"
+    assert_contains "named paste page shows permanent" "$x_page" "Never (permanent)"
+    assert_contains "named paste viewer has raw-url helper" "$x_page" "rawUrlOfPage"
+    assert_eq "named paste raw round trip" "$(printf '# named heading\n\nbody')" "$(curl -s "$BASE/x/$xname?raw")"
+    assert_eq "duplicate named paste 409" "$(echo -n "dup" | http_code -H "Authorization: $NAMED_KEY" --data-binary @- "$BASE/x/$xname")" "409"
+    assert_eq "named paste survives refused overwrite" "$(printf '# named heading\n\nbody')" "$(curl -s "$BASE/x/$xname?raw")"
+    assert_eq "overwrite accepted with X-I-Really-Mean-It" "$(echo -n "overwritten" | http_code -H "Authorization: $NAMED_KEY" -H "X-I-Really-Mean-It: yes" --data-binary @- "$BASE/x/$xname")" "200"
+    assert_eq "overwritten content served" "$(curl -s "$BASE/x/$xname?raw")" "overwritten"
+    assert_eq "named paste GET is public" "$(http_code "$BASE/x/$xname")" "200"
+    assert_eq "invalid name (leading dot) 404" "$(http_code "$BASE/x/.bad")" "404"
+    assert_eq "invalid name (slash) 404" "$(http_code "$BASE/x/a/b")" "404"
+    assert_eq "unauthenticated DELETE 401" "$(http_code -X DELETE "$BASE/x/$xname")" "401"
+    assert_contains "authorized DELETE accepted" "$(curl -s -X DELETE -H "Authorization: $NAMED_KEY" "$BASE/x/$xname")" "OK, sent command to delete"
+    xgone="no"
+    for _ in $(seq 1 18); do
+        if [ "$(http_code "$BASE/x/$xname")" = "404" ]; then xgone="yes"; break; fi
+        sleep 5
+    done
+    assert_eq "deleted named paste returns 404" "$xgone" "yes"
+    assert_eq "DELETE on missing named paste 404" "$(http_code -X DELETE -H "Authorization: $NAMED_KEY" "$BASE/x/never-existed-$RANDOM")" "404"
+else
+    skip "named paste tests (no NAMED_KEY in config)"
+fi
+
 echo "[pages and assets]"
 upload_page=$(curl -s "$BASE/post")
 assert_contains "upload page has drop zone" "$upload_page" 'id="dropZone"'
