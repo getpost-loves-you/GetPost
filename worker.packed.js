@@ -941,6 +941,224 @@ document.getElementById('pasteToggle').addEventListener('click', function(e) {
           url,
         );
       }
+    } else if (url.pathname === "/x" || url.pathname.startsWith("/x/")) {
+      // named pastes: operator-published content at /x/<name>. KV keys are
+      // "_X_" + name - "_" is not in the Crockford base32 ULID alphabet, so
+      // named keys can never collide with generated content keys.
+      const name = url.pathname.slice(3);
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) {
+        return buildResponse(
+          "Sorry, invalid key!",
+          DEFAULT_MIME_TEXT, {},
+          404,
+          url,
+        );
+      }
+      const namedKey = "_X_" + name;
+
+      if (request.method === "POST" || request.method === "DELETE") {
+        // writes and deletes are gated on the operator secret (NAMED_KEY binding);
+        // reads stay public - the capability is the encryption, not the name
+        if (typeof NAMED_KEY === "undefined" || !NAMED_KEY) {
+          return buildResponse(
+            "Sorry, named pastes are not enabled on this instance!",
+            DEFAULT_MIME_TEXT, {},
+            403,
+            url,
+          );
+        }
+        if (requestHeadersAndFriends["authorization"] !== NAMED_KEY) {
+          return buildResponse(
+            "Sorry, invalid authorization!",
+            DEFAULT_MIME_TEXT, {},
+            401,
+            url,
+          );
+        }
+      }
+
+      if (request.method === "POST") {
+        const blob = await request.arrayBuffer();
+        requestBodyForDebug = blob.slice(0, 20);
+
+        // same advertised limit as /post (10MB plus encryption container slack)
+        if (blob.byteLength > 10 * 1024 * 1024 + 4096) {
+          return buildResponse(
+            "Sorry, content exceeds the 10MB limit!",
+            DEFAULT_MIME_TEXT, {},
+            413,
+            url,
+          );
+        }
+
+        // refuse silent clobbering - overwriting needs an explicit header
+        const existing = await NAMESPACE.getWithMetadata(namedKey, "text");
+        const overwrite = existing.value !== null;
+        if (overwrite && requestHeadersAndFriends["x-i-really-mean-it"] !== "yes") {
+          return buildResponse(
+            `Sorry, /x/${name} already exists - send 'X-I-Really-Mean-It: yes' to overwrite it.`,
+            DEFAULT_MIME_TEXT, {},
+            409,
+            url,
+          );
+        }
+
+        // named pastes default to permanent (the operator secret is the gate);
+        // a numeric X-TTL opts into expiry instead, clamped like /post
+        const xTtlRaw = requestHeadersAndFriends["x-ttl"];
+        let permanent = true;
+        let xTtlSeconds = 0;
+        if (xTtlRaw !== undefined) {
+          xTtlSeconds = parseInt(xTtlRaw, 10);
+          if (isNaN(xTtlSeconds) || xTtlSeconds <= 0) {
+            permanent = true; // garbage TTL -> the permanent default
+          } else {
+            permanent = false;
+            if (xTtlSeconds < 60) {
+              xTtlSeconds = 60; // KV rejects expirationTtl below 60 seconds
+            }
+          }
+        }
+        const expiryTime = permanent ?
+          "never" :
+          new Date(xTtlSeconds * 1000 + now).toISOString();
+
+        // no edit/del metadata keys - the operator secret is the only mutation path
+        const putOptions = {
+          metadata: {}
+        };
+        if (permanent) {
+          putOptions.metadata.permanent = true;
+        } else {
+          putOptions.expirationTtl = xTtlSeconds;
+          putOptions.metadata.expiry = expiryTime;
+        }
+        await NAMESPACE.put(namedKey, blob, putOptions);
+
+        // overwrites must be visible promptly on this PoP, like deletes
+        await purgeNamedPasteCache(url, name);
+
+        const responseData = {
+          message: `GetPost stored ${blob.byteLength} bytes at /x/${name}${overwrite ? " (overwrote existing content)" : ""}!`,
+          size: blob.byteLength,
+          name: name,
+          share_url: `${url.origin}/x/${name}`,
+          raw_url: `${url.origin}/x/${name}?raw`,
+          expires_at: expiryTime
+        };
+
+        const acceptHeader = requestHeadersAndFriends["accept"] || "";
+        const isCLITool = isCliRequest(requestHeadersAndFriends);
+        if (acceptHeader.includes("application/json")) {
+          return buildResponse(JSON.stringify(responseData, null, 2), "application/json", {}, 200, url);
+        } else if (
+          (acceptHeader.includes("text/plain") && !acceptHeader.includes("text/html")) ||
+          (isCLITool && !acceptHeader.includes("text/html"))
+        ) {
+          const textResp = `${responseData.message}
+
+share link: ${responseData.share_url}
+raw link: ${responseData.raw_url}
+expires at: ${responseData.expires_at}`;
+          return buildResponse(textResp, DEFAULT_MIME_TEXT, {}, 200, url);
+        } else {
+          const htmlResp = marked(`${responseData.message}
+
+**Share link:** ${responseData.share_url}
+**Raw link:** ${responseData.raw_url}
+**Expires at:** ${responseData.expires_at}`);
+          return buildResponse(htmlResp, DEFAULT_MIME_HTML, {}, 200, url);
+        }
+      } else if (request.method === "DELETE") {
+        const existing = await NAMESPACE.getWithMetadata(namedKey, "text");
+        if (existing.value === null) {
+          return buildResponse(
+            "Sorry, invalid key!",
+            DEFAULT_MIME_TEXT, {},
+            404,
+            url,
+          );
+        }
+        await NAMESPACE.delete(namedKey);
+        await purgeNamedPasteCache(url, name);
+        return buildResponse(
+          `OK, sent command to delete /x/${name} - please wait 3min for full delete.`,
+          DEFAULT_MIME_TEXT, {},
+          200,
+          url,
+        );
+      } else if (request.method === "GET" || request.method === "HEAD") {
+        const raw = url.searchParams.has("raw");
+        const customContentType = url.searchParams.get("content_type");
+        const customTitle = url.searchParams.get("title");
+
+        // same edge-cache behavior as the /post GET path
+        const edgeCache = caches.default;
+        if (request.method === "GET") {
+          const cachedResponse = await edgeCache.match(request);
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+        }
+        const {
+          value: contentFromKeyAsArrayBuffer,
+          metadata
+        } =
+        await NAMESPACE.getWithMetadata(namedKey, "arrayBuffer");
+        if (contentFromKeyAsArrayBuffer === null) {
+          return buildResponse(
+            "Sorry, invalid key!",
+            DEFAULT_MIME_TEXT, {},
+            404,
+            url,
+          );
+        }
+        const [generatedBodyHtml, type] = generateHtmlBasedOnType(
+          contentFromKeyAsArrayBuffer,
+          url,
+          metadata,
+          customTitle
+        );
+        if (raw) {
+          let responseContentType = type;
+          if (customContentType) {
+            if (isValidContentType(customContentType)) {
+              responseContentType = customContentType;
+            } else {
+              return buildResponse(
+                "Sorry, invalid content_type parameter!",
+                DEFAULT_MIME_TEXT, {},
+                400,
+                url,
+              );
+            }
+          }
+          return cacheAndReturn(fetch_event, edgeCache, buildResponse(
+            contentFromKeyAsArrayBuffer,
+            responseContentType,
+            CACHE_CONTENT,
+            200,
+            url,
+          ));
+        } else {
+          return cacheAndReturn(fetch_event, edgeCache, buildResponse(
+            generatedBodyHtml,
+            DEFAULT_MIME_HTML,
+            CACHE_CONTENT,
+            200,
+            url,
+          ));
+        }
+      } else {
+        return buildResponse(
+          "Method not allowed - use GET, POST or DELETE.",
+          DEFAULT_MIME_TEXT, {
+            Allow: "GET, HEAD, POST, DELETE, OPTIONS"
+          },
+          405,
+          url,
+        );
+      }
     } else if (url.pathname === "/headers") {
       // helpful debug endpoint - return the headersAndFriends object, as a nicely formatted string
       requestHeadersAndFriends.url = url.toString();
@@ -1595,6 +1813,14 @@ async function deletePost(url) {
   return buildResponse("Sorry, invalid del key!", DEFAULT_MIME_TEXT, {}, 404, url);
 }
 
+// best-effort purge of this PoP's cached copies of a named paste (page + raw),
+// mirroring the purge loop in deletePost; other PoPs age out via max-age
+async function purgeNamedPasteCache(url, name) {
+  const edgeCache = caches.default;
+  await edgeCache.delete(url.origin + "/x/" + name);
+  await edgeCache.delete(url.origin + "/x/" + name + "?raw");
+}
+
 // GET on a delete link returns instructions (CLI) or a confirmation page (browser) that POSTs back
 function buildDeleteConfirmation(url, requestHeadersAndFriends) {
   if (isCliRequest(requestHeadersAndFriends)) {
@@ -1632,10 +1858,12 @@ async function doDelete() {
 
 // Handle CORS preflight requests
 function handleCorsPreflightRequest(url) {
+  // named-paste paths additionally allow DELETE (operator mutation path)
+  const isNamedPaste = url.pathname === "/x" || url.pathname.startsWith("/x/");
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-TTL",
+    "Access-Control-Allow-Methods": isNamedPaste ? "GET, POST, DELETE, OPTIONS" : "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-TTL, Authorization, X-I-Really-Mean-It",
     "Access-Control-Max-Age": "86400", // 24 hours
   };
 
@@ -1648,9 +1876,10 @@ function handleCorsPreflightRequest(url) {
 // Add CORS headers if cors=1 parameter is present
 function addCorsHeaders(headers, url) {
   if (url && url.searchParams.has("cors")) {
+    const isNamedPaste = url.pathname === "/x" || url.pathname.startsWith("/x/");
     headers["Access-Control-Allow-Origin"] = "*";
-    headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-    headers["Access-Control-Allow-Headers"] = "Content-Type, X-TTL";
+    headers["Access-Control-Allow-Methods"] = isNamedPaste ? "GET, POST, DELETE, OPTIONS" : "GET, POST, OPTIONS";
+    headers["Access-Control-Allow-Headers"] = "Content-Type, X-TTL, Authorization, X-I-Really-Mean-It";
   }
   return headers;
 }
@@ -1895,7 +2124,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "application/pdf":
     case "application/zip":
     case "application/octet-stream":
-      injectorScript = "window.location.assign(window.location.href+'&raw')";
+      // append the raw flag correctly for both /post?key=... (has a query
+      // string already) and /x/<name> (bare path) viewer pages
+      injectorScript = "window.location.assign(window.location.href.split('#')[0]+(window.location.search?'&raw':'?raw'))";
       break;
     case "text/x-url":
       // NO server-side redirect - the viewer page fetches the raw URL, validates
@@ -1942,7 +2173,8 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     description = "GetPost: " + type;
   }
   if (type.startsWith("image/")) {
-    imageUrl = url.toString() + "&raw";
+    // /post?key=... pages already have a query string; /x/<name> pages do not
+    imageUrl = url.toString() + (url.search ? "&raw" : "?raw");
     injectorScript = "";
   }
   const contentAsWrappedHtml = `<html>
@@ -2380,6 +2612,17 @@ body {
         return fence + lang + NL + text + NL + fence;
     }
 
+    // build the raw-bytes URL for the current page: /post?key=... pages already
+    // carry a query string so the raw flag joins with an ampersand, while named
+    // /x/name pages have a bare path and need a question mark instead
+    function rawUrlOfPage() {
+        var base = window.location.href.split('#')[0];
+        if (window.location.search) {
+            return base + '&raw';
+        }
+        return base + '?raw';
+    }
+
     // --- url shortlink countdown ---
     // a paste whose entire content is one http/https URL acts as a shortlink:
     // the viewer shows the destination plus a cancellable 5 second countdown.
@@ -2447,7 +2690,7 @@ body {
     async function checkIfUrlRedirect() {
         if (payloadType !== 'text/x-url') return false;
         try {
-            var rawUrl = window.location.href.split('#')[0] + '&raw';
+            var rawUrl = rawUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -2472,7 +2715,7 @@ body {
         // the server already typed the payload - only refetch the raw bytes when it's encrypted
         if (payloadType !== 'application/x-encrypted') return false;
         try {
-            var rawUrl = window.location.href.split('#')[0] + '&raw';
+            var rawUrl = rawUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -2522,8 +2765,7 @@ body {
         document.getElementById('markdownContent').classList.add('hidden');
         document.getElementById('encryptedNotice').classList.remove('hidden');
         // let people save the still-encrypted container without the passphrase
-        document.getElementById('downloadEncrypted').href =
-            window.location.href.split('#')[0] + '&raw';
+        document.getElementById('downloadEncrypted').href = rawUrlOfPage();
     }
 
     function showStatus(message, type) {
@@ -2624,6 +2866,24 @@ body {
         bar.classList.add('active');
     }
 
+    // fragment carry-forward: when this page was opened with a fragment (which
+    // carries the passphrase for an encrypted paste), copy that fragment onto any
+    // same-origin /x/ links inside the rendered content that have no fragment of
+    // their own - this lets one passphrase flow across a set of encrypted /x/
+    // pastes that link to each other (e2ee blog navigation). it applies ONLY to
+    // /x/ links on this same origin; everything else is left untouched.
+    function carryFragmentForward(container) {
+        if (!window.location.hash) return;
+        var anchors = container.querySelectorAll('a');
+        for (var i = 0; i < anchors.length; i++) {
+            var anchor = anchors[i];
+            if (anchor.origin !== window.location.origin) continue;
+            if (anchor.pathname.indexOf('/x/') !== 0) continue;
+            if (anchor.hash) continue;
+            anchor.hash = window.location.hash;
+        }
+    }
+
     function displayDecryptedContent(decryptedData) {
         var decryptedDiv = document.getElementById('decryptedContent');
         var dataString = new TextDecoder('utf-8').decode(decryptedData);
@@ -2663,6 +2923,7 @@ body {
                 decryptedDiv.innerHTML = '<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
                     dataString.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
             }
+            carryFragmentForward(decryptedDiv);
         } else {
             var mimeType = originalMimeType || 'application/octet-stream';
             var blob = new Blob([decryptedData], { type: mimeType });
