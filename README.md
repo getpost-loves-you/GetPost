@@ -1,8 +1,8 @@
 # GetPost v2.0
 
 **End-to-end encrypted file sharing on Cloudflare Workers.**
-🔐 Encrypted in your browser before it ever leaves. No accounts, no tracking, globally distributed.
-🚀 Run your own instance for free, on any domain.
+Encrypted in your browser before it ever leaves. No accounts, no tracking, globally distributed.
+Run your own instance for free, on any domain.
 
 GetPost is a small, hackable [pastebin](https://www.urbandictionary.com/define.php?term=Pastebin) and file host. Drop a file in the browser and it's encrypted client-side — the server only ever stores opaque ciphertext, and the passphrase travels in the URL fragment, which never reaches the server. Prefer the terminal? There's a one-liner curl path and an encrypted CLI client each instance serves itself.
 
@@ -18,12 +18,12 @@ cp .staging .mydomain      # add your Cloudflare API keys
 
 ## Why GetPost?
 
-- 🔐 **End-to-end encrypted** — web uploads are encrypted in-browser with NaCl SecretBox + Argon2id; the server never sees your plaintext or your passphrase.
-- 🔗 **One link to share** — the passphrase rides in the URL fragment, so anyone with the link can decrypt, and no one without it can.
-- 🗑️ **You hold the delete key** — every upload gets a unique deletion URL.
-- ⚡ **Globally distributed** — runs at Cloudflare's edge, with popular content cached close to readers.
-- 🛡️ **No accounts, no tracking** — no cookies, no analytics, no third-party scripts.
-- 🎨 **Hackable & free** — a minimal, suckless codebase on Cloudflare's free tier (100k reads, 1k writes daily). No Wrangler, no NPM, no Rust toolchain.
+- **End-to-end encrypted** — web uploads are encrypted in-browser with NaCl SecretBox + Argon2id; the server never sees your plaintext or your passphrase.
+- **One link to share** — the passphrase rides in the URL fragment, so anyone with the link can decrypt, and no one without it can.
+- **You hold the delete key** — every upload gets a unique deletion URL.
+- **Globally distributed** — runs at Cloudflare's edge, with popular content cached close to readers.
+- **No accounts, no tracking** — no cookies, no analytics, no third-party scripts.
+- **Hackable & free** — a minimal, suckless codebase on Cloudflare's free tier (100k reads, 1k writes daily). No Wrangler, no NPM, no Rust toolchain.
 
 ## Quick Start
 
@@ -81,24 +81,24 @@ The deploy needs only `curl`, `python3`, `jq`, and a Linux-like shell (macOS, Li
 
 ## Features
 
-- **🔐 Client-side encryption** — NaCl SecretBox (XSalsa20-Poly1305) + Argon2id, all in-browser
-- **📝 Smart rendering** — markdown as rich text, source as fenced code blocks (`?lang=` or filename hint), everything else verbatim
-- **🖼️ Inline media** — PNG, JPEG, GIF, WebP, SVG, MP4, WebM, MP3, Ogg, FLAC, WAV, PDF
-- **🔗 Raw access** — append `&raw` to any link for the original bytes
-- **⏰ Configurable TTL** — default 1 year, set via `X-TTL` (seconds); operators can unlock no-expiry posts with a secret key
-- **🗑️ Delete keys** — every upload gets a unique deletion URL (deletion requires POST, so link crawlers can't trigger it)
-- **🌐 CORS** — add `?cors=1` for cross-origin reads
-- **⚡ Edge caching** — content is cached at the PoP and purged on delete (custom domains)
+- **Client-side encryption** — NaCl SecretBox (XSalsa20-Poly1305) + Argon2id, all in-browser
+- **Smart rendering** — markdown as rich text, source as fenced code blocks (`?lang=` or filename hint), everything else verbatim
+- **Inline media** — PNG, JPEG, GIF, WebP, SVG, MP4, WebM, MP3, Ogg, FLAC, WAV, PDF
+- **Raw access** — append `&raw` to any link for the original bytes
+- **Configurable TTL** — default 1 year, set via `X-TTL` (seconds); operators can unlock no-expiry posts with a secret key
+- **Delete keys** — every upload gets a unique deletion URL (deletion requires POST, so link crawlers can't trigger it)
+- **CORS** — add `?cors=1` for cross-origin reads
+- **Edge caching** — content is cached at the PoP and purged on delete (custom domains)
 
 ## Security Model
 
 GetPost favors **transparent simplicity** over false promises.
 
 **What's protected:**
-- 🔐 **End-to-end encryption** — web (and `pastebin-crypted.py`) uploads are encrypted before they leave your device; the server only stores ciphertext.
-- 🔑 **The passphrase never reaches the server** — it lives in the URL fragment, which browsers don't transmit.
-- 🔒 **Data at rest & in transit** — Cloudflare's AES-256 on KV, TLS on every request.
-- 🚫 **No tracking** — no cookies, analytics, or third-party scripts.
+- **End-to-end encryption** — web (and `pastebin-crypted.py`) uploads are encrypted before they leave your device; the server only stores ciphertext.
+- **The passphrase never reaches the server** — it lives in the URL fragment, which browsers don't transmit.
+- **Data at rest & in transit** — Cloudflare's AES-256 on KV, TLS on every request.
+- **No tracking** — no cookies, analytics, or third-party scripts.
 
 **What's not:**
 - **Plain `curl` uploads are stored unencrypted** — use `pastebin-crypted.py` (or encrypt the file yourself) if you want E2E from the terminal.
@@ -224,7 +224,7 @@ Browser uploads and `pastebin-crypted.py` produce a self-describing binary conta
 
 **CC0 — No Rights Reserved.** Fork it, hack it, deploy it everywhere.
 
-- 📄 [Source](https://github.com/getpost-loves-you/getpost) · 🚀 [Setup](SETUP.md) · 🐛 [Issues](https://github.com/getpost-loves-you/getpost/issues)
+- [Source](https://github.com/getpost-loves-you/getpost) · [Setup](SETUP.md) · [Issues](https://github.com/getpost-loves-you/getpost/issues)
 
 GetPost revives the spirit of personal file servers from the pre-GitHub era, when sharing a file meant SCPing it to your homepage — now globally distributed, zero-maintenance, free, and encrypted before it leaves your hands.
 
