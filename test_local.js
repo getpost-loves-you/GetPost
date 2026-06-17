@@ -764,6 +764,16 @@ async function test(name, fn) {
     assert.strictEqual((await call("GET", "/about")).status, 200);
   });
 
+  await test("about page curl examples target /post, not the about page itself", async () => {
+    const html = await (await call("GET", "/about")).text();
+    // the snippets interpolate the request URL's host; uploads must POST to /post.
+    // regression guard: ${url.toString()} here would yield .../about (a docs page
+    // that stores nothing), which is the bug this catches.
+    assert.ok(html.includes("/post"), "upload target present");
+    assert.ok(/--data-binary @\S+ https:\/\/[^/]+\/post/.test(html), "curl posts to /post");
+    assert.ok(!/--data-binary[^\n]*\/about/.test(html), "no upload aimed at /about");
+  });
+
   await test("cli client served byte-identical to repo copy", async () => {
     const served = await (await call("GET", "/pastebin-crypted.py")).text();
     assert.strictEqual(served, fs.readFileSync(__dirname + "/pastebin-crypted.py", "utf8"));
