@@ -596,6 +596,20 @@ body {
         status.style.display = 'block';
     }
 
+    // argon2's asm.js runs the whole derivation synchronously on the main
+    // thread (no Web Worker in the bundle), which blocks paint. Awaiting this
+    // first lets the browser actually render the just-set status message before
+    // the thread locks up for the multi-second derivation - without it, mobile
+    // shows stale UI until derivation finishes. Two frames: one to flush the
+    // pending paint, one to be sure it landed.
+    function yieldForPaint() {
+        return new Promise(function(resolve) {
+            requestAnimationFrame(function() {
+                requestAnimationFrame(resolve);
+            });
+        });
+    }
+
     async function deriveKey(password, salt) {
         var passwordBytes = new TextEncoder().encode(password);
         var result = await argon2.hash({
@@ -625,7 +639,7 @@ body {
 
         try {
             document.getElementById('decryptButton').disabled = true;
-            showStatus('deriving key (argon2id)...', 'info');
+            showStatus('deriving key (argon2id, may take a few seconds)...', 'info');
 
             // container: 0x00 "GPE1" + salt(16) + nonce(24) + ciphertext
             if (encryptedData.length <= 5 ||
@@ -646,6 +660,8 @@ body {
             var nonce = nonceAndCiphertext.slice(0, nonceSize);
             var ciphertext = nonceAndCiphertext.slice(nonceSize);
 
+            // let the 'deriving key...' status paint before argon2 blocks the thread
+            await yieldForPaint();
             var t0 = performance.now();
             var key = await deriveKey(password, salt);
             var keyMs = Math.round(performance.now() - t0);
