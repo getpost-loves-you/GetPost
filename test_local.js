@@ -759,37 +759,46 @@ async function test(name, fn) {
     }
   });
 
-  await test("favicon and about served", async () => {
-    // favicon is now an SVG (keyhole + hash); .ico path serves the same SVG for legacy clients
-    for (const path of ["/favicon.svg", "/favicon.ico"]) {
-      const resp = await call("GET", path);
-      assert.strictEqual(resp.status, 200, path);
-      assert.strictEqual(resp.headers.get("content-type"), "image/svg+xml", path);
-      assert.ok((await resp.text()).includes("<svg"), path + " body is svg");
-    }
+  await test("favicon served as both ico (raster) and svg", async () => {
+    // raster ico for clients that won't parse svg (Signal, link crawlers);
+    // svg for browsers that accept it
+    const ico = await call("GET", "/favicon.ico");
+    assert.strictEqual(ico.status, 200);
+    assert.strictEqual(ico.headers.get("content-type"), "image/x-icon");
+    const icoBytes = new Uint8Array(await ico.arrayBuffer());
+    // ICO magic: 00 00 01 00
+    assert.deepStrictEqual([...icoBytes.slice(0, 4)], [0, 0, 1, 0], "valid ICO header");
+
+    const svg = await call("GET", "/favicon.svg");
+    assert.strictEqual(svg.headers.get("content-type"), "image/svg+xml");
+    assert.ok((await svg.text()).includes("<svg"));
     assert.strictEqual((await call("GET", "/about")).status, 200);
   });
 
-  await test("icon.svg (preview image) served as svg", async () => {
-    const resp = await call("GET", "/icon.svg");
-    assert.strictEqual(resp.status, 200);
-    assert.strictEqual(resp.headers.get("content-type"), "image/svg+xml");
-    assert.ok((await resp.text()).includes("<svg"));
+  await test("preview icon served as png (raster) and svg", async () => {
+    const png = await call("GET", "/icon.png");
+    assert.strictEqual(png.status, 200);
+    assert.strictEqual(png.headers.get("content-type"), "image/png");
+    const pngBytes = new Uint8Array(await png.arrayBuffer());
+    // PNG magic: 89 50 4E 47
+    assert.deepStrictEqual([...pngBytes.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47], "valid PNG header");
+    assert.strictEqual((await call("GET", "/icon.svg")).headers.get("content-type"), "image/svg+xml");
   });
 
-  await test("static assets (favicon/icon) carry the long cache header", async () => {
-    for (const path of ["/favicon.svg", "/icon.svg"]) {
+  await test("static icon assets carry the long cache header", async () => {
+    for (const path of ["/favicon.svg", "/favicon.ico", "/icon.svg", "/icon.png"]) {
       const cc = (await call("GET", path)).headers.get("cache-control") || "";
       assert.ok(cc.includes("max-age=86400"), path + " cached: " + cc);
     }
   });
 
-  await test("text post link-preview falls back to the site icon", async () => {
+  await test("text post link-preview falls back to the raster site icon", async () => {
     const json = await uploadJson("# just text, no image");
     const html = await (await call("GET", "/post?key=" + json.key)).text();
-    // no uploaded image -> og:image should point at /icon.svg, not be empty
-    assert.ok(/og:image" content="https?:\/\/[^"]+\/icon\.svg"/.test(html), "og:image falls back to icon");
-    assert.ok(html.includes('rel="icon" type="image/svg+xml"'), "favicon link present");
+    // no uploaded image -> og:image should point at the PNG (svg is rejected by crawlers)
+    assert.ok(/og:image" content="https?:\/\/[^"]+\/icon\.png"/.test(html), "og:image falls back to icon.png");
+    assert.ok(html.includes('href="/favicon.ico"'), "ico favicon link present");
+    assert.ok(html.includes('type="image/svg+xml"'), "svg favicon link present");
   });
 
   await test("about page curl examples target /post, not the about page itself", async () => {

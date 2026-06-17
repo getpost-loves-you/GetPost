@@ -200,10 +200,11 @@ if curl -s "$BASE/pastebin-crypted.py" | cmp -s - pastebin-crypted.py; then
 else
     fail "served cli client byte-identical to repo copy"
 fi
-assert_eq "favicon.ico 200" "$(http_code "$BASE/favicon.ico")" "200"
+assert_eq "favicon.ico served as raster ico" "$(content_type "$BASE/favicon.ico")" "image/x-icon"
 assert_eq "favicon.svg served as svg" "$(content_type "$BASE/favicon.svg")" "image/svg+xml"
+assert_eq "icon.png served as raster png" "$(content_type "$BASE/icon.png")" "image/png"
 assert_eq "icon.svg served as svg" "$(content_type "$BASE/icon.svg")" "image/svg+xml"
-for lib in naclfast.min.js argon2bundled.min.js qrcode.min.js marked.min.js favicon.svg icon.svg; do
+for lib in naclfast.min.js argon2bundled.min.js qrcode.min.js marked.min.js favicon.svg favicon.ico icon.svg icon.png; do
     assert_contains "$lib cached" "$(lower_headers "$BASE/$lib")" "max-age=86400"
 done
 assert_contains "content cached briefly" "$(lower_headers "$raw_url")" "max-age=300"

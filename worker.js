@@ -25,6 +25,11 @@ const marked_base64 = `AUTOINSERT_MARKED__MIN__JS__BASE64`; // eslint-disable-li
 // for link previews. Spliced raw (no backticks/${} in the files).
 const favicon_svg = `AUTOINSERT_FAVICON__SVG`; // eslint-disable-line
 const icon_svg = `AUTOINSERT_ICON__SVG`; // eslint-disable-line
+// Raster fallbacks for clients that refuse SVG (Signal and most link-preview
+// crawlers won't parse SVG - too much attack surface). favicon.ico is a real
+// multi-size ICO (16/32/48); icon.png is the 512px preview image.
+const favicon_ico_base64 = `AUTOINSERT_FAVICON__ICO__BASE64`; // eslint-disable-line
+const icon_png_base64 = `AUTOINSERT_ICON__PNG__BASE64`; // eslint-disable-line
 
 const ENCODING_LEN = ENCODING.length;
 const TIME_LEN = 10;
@@ -555,14 +560,18 @@ expires at: ${responseData.expires_at}`;
       // return about/docs page
       const about_page = `AUTOINSERT_ABOUT__HTML`; // eslint-disable-line
       return buildResponse(about_page, DEFAULT_MIME_HTML, {}, 200, url);
-    } else if (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico") {
-      // both paths serve the SVG favicon (keyhole + hash). modern browsers honor
-      // the SVG via the <link rel="icon"> in each page; the /favicon.ico fallback
-      // returns the same SVG for clients that request the legacy path directly.
+    } else if (url.pathname === "/favicon.svg") {
+      // SVG favicon for browsers that accept it (via <link rel="icon">)
       return buildResponse(favicon_svg, "image/svg+xml", CACHE_STATIC, 200, url);
+    } else if (url.pathname === "/favicon.ico") {
+      // real multi-size ICO for browsers and clients that won't parse SVG
+      return buildResponse(str2ab(atob(favicon_ico_base64)), "image/x-icon", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/icon.svg") {
-      // the full envelope mark, used as the link-preview (og:image) image
+      // the full envelope mark as SVG (browsers, crisp at any size)
       return buildResponse(icon_svg, "image/svg+xml", CACHE_STATIC, 200, url);
+    } else if (url.pathname === "/icon.png") {
+      // raster preview image - the og:image, since link-preview crawlers reject SVG
+      return buildResponse(str2ab(atob(icon_png_base64)), "image/png", CACHE_STATIC, 200, url);
     } else {
       return buildResponse(
         `You probably want ${url.host}/post, not ${url.pathname}!`,
@@ -992,8 +1001,8 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   let imageUrl = "";
   let description = "";
   // link-preview image: the uploaded image itself when there is one, else the
-  // site icon so text/encrypted/binary posts still get a branded card
-  const iconUrl = url ? `${url.protocol}//${url.host}/icon.svg` : "/icon.svg";
+  // site icon. PNG, not SVG - link-preview crawlers (Signal, etc.) won't render SVG.
+  const iconUrl = url ? `${url.protocol}//${url.host}/icon.png` : "/icon.png";
   // future use
   const encodedPayload = "";
   // strip non-url characters from description
