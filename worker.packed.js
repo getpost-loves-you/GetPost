@@ -272,6 +272,8 @@ body {
 .drop-zone p {
     color: #555;
     font-size: 13px;
+    text-align: center;
+    padding: 0 1rem;
 }
 
 .drop-zone p a {
@@ -500,6 +502,18 @@ body {
 
 .bottom a { color: #333; text-decoration: none; }
 .bottom a:hover { color: #555; }
+
+/* on narrow screens the two footer notes crush into cramped side-by-side
+   columns; stack and center them so each reads as its own line instead */
+@media (max-width: 520px) {
+    .bottom {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 0.5rem;
+    }
+    .bottom span { overflow-wrap: anywhere; }
+}
 
 input[type="file"] { display: none; }
 </style>
