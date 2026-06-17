@@ -552,7 +552,7 @@ input[type="file"] { display: none; }
 
 <div class="bottom">
     <span>e2e encrypted (web uploads)</span>
-    <span>curl --data-binary @file ${url.toString()} &mdash; stored unencrypted</span>
+    <span>curl --data-binary @file https://${url.host}/post &mdash; stored unencrypted</span>
 </div>
 
 <input type="file" id="fileInput">
@@ -1633,13 +1633,13 @@ ul li:before {
 
 <h2>command line</h2>
 <pre><code># basic upload
-curl --data-binary @myfile.txt ${url.toString()}
+curl --data-binary @myfile.txt https://${url.host}/post
 
 # upload from clipboard (macOS)
-pbpaste | curl --data-binary @- ${url.toString()}
+pbpaste | curl --data-binary @- https://${url.host}/post
 
 # custom expiration (1 hour)
-curl -H "X-TTL: 3600" --data-binary @file.txt ${url.toString()}</code></pre>
+curl -H "X-TTL: 3600" --data-binary @file.txt https://${url.host}/post</code></pre>
 
 <p>CLI uploads are stored unencrypted unless you encrypt first &mdash; see below.</p>
 
@@ -1657,7 +1657,7 @@ PASTEBIN=https://${url.host} python3 pastebin-crypted.py myfile.txt</code></pre>
 <h2>one-liner script</h2>
 <p>Save as <code>/usr/local/bin/pastebin</code> and make executable:</p>
 <pre><code>#!/bin/bash
-curl --data-binary @\${1:--} ${url.toString()}</code></pre>
+curl --data-binary @\${1:--} https://${url.host}/post</code></pre>
 <p>Usage: <code>pastebin myfile.txt</code> or <code>echo "hello" | pastebin</code></p>
 
 <h2>features</h2>
@@ -2775,6 +2775,20 @@ body {
         status.style.display = 'block';
     }
 
+    // argon2's asm.js runs the whole derivation synchronously on the main
+    // thread (no Web Worker in the bundle), which blocks paint. Awaiting this
+    // first lets the browser actually render the just-set status message before
+    // the thread locks up for the multi-second derivation - without it, mobile
+    // shows stale UI until derivation finishes. Two frames: one to flush the
+    // pending paint, one to be sure it landed.
+    function yieldForPaint() {
+        return new Promise(function(resolve) {
+            requestAnimationFrame(function() {
+                requestAnimationFrame(resolve);
+            });
+        });
+    }
+
     async function deriveKey(password, salt) {
         var passwordBytes = new TextEncoder().encode(password);
         var result = await argon2.hash({
@@ -2804,7 +2818,7 @@ body {
 
         try {
             document.getElementById('decryptButton').disabled = true;
-            showStatus('deriving key (argon2id)...', 'info');
+            showStatus('deriving key (argon2id, may take a few seconds)...', 'info');
 
             // container: 0x00 "GPE1" + salt(16) + nonce(24) + ciphertext
             if (encryptedData.length <= 5 ||
@@ -2825,6 +2839,8 @@ body {
             var nonce = nonceAndCiphertext.slice(0, nonceSize);
             var ciphertext = nonceAndCiphertext.slice(nonceSize);
 
+            // let the 'deriving key...' status paint before argon2 blocks the thread
+            await yieldForPaint();
             var t0 = performance.now();
             var key = await deriveKey(password, salt);
             var keyMs = Math.round(performance.now() - t0);

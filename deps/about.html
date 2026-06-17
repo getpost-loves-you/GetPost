@@ -100,13 +100,13 @@ ul li:before {
 
 <h2>command line</h2>
 <pre><code># basic upload
-curl --data-binary @myfile.txt ${url.toString()}
+curl --data-binary @myfile.txt https://${url.host}/post
 
 # upload from clipboard (macOS)
-pbpaste | curl --data-binary @- ${url.toString()}
+pbpaste | curl --data-binary @- https://${url.host}/post
 
 # custom expiration (1 hour)
-curl -H "X-TTL: 3600" --data-binary @file.txt ${url.toString()}</code></pre>
+curl -H "X-TTL: 3600" --data-binary @file.txt https://${url.host}/post</code></pre>
 
 <p>CLI uploads are stored unencrypted unless you encrypt first &mdash; see below.</p>
 
@@ -124,7 +124,7 @@ PASTEBIN=https://${url.host} python3 pastebin-crypted.py myfile.txt</code></pre>
 <h2>one-liner script</h2>
 <p>Save as <code>/usr/local/bin/pastebin</code> and make executable:</p>
 <pre><code>#!/bin/bash
-curl --data-binary @\${1:--} ${url.toString()}</code></pre>
+curl --data-binary @\${1:--} https://${url.host}/post</code></pre>
 <p>Usage: <code>pastebin myfile.txt</code> or <code>echo "hello" | pastebin</code></p>
 
 <h2>features</h2>
