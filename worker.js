@@ -9,8 +9,6 @@ const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const DEFAULT_MIME_TEXT = "text/raw; charset=UTF-8";
 const DEFAULT_MIME_HTML = "text/html; charset=UTF-8";
-const favicon_gzip =
-  "H4sIAO9PM2AAA+2UMQrCQBBF36wbNZUBiUKa2MXOI9il9Rh6DMHKyjOls/UKVpYqFimEOBpE4yYXkLzls7Pzh+FXC6InCHix8mCk91T1bE1UQr80hQ9fdZIk+L6PMQZrLWmaIiJEUUQYhrS0tPwx3crLOIXj9vCaJ5o3//Y6VUNwqVvg5nl/cA2JbZ1bbs7ncFrCfgNbDbArVGdY5DBTxTfVFQYXKFTrA2RDOI7hHsMDH7d8sX4FAAA=";
 
 // This is non-standard, but very convenient and relatively simple:
 // specific interpolated strings - those wrapped in single-backticks (`) - and prefaced by AUTOINSERT_
@@ -22,6 +20,11 @@ const naclfast_base64 = `AUTOINSERT_NACLFAST__MIN__JS__BASE64`; // eslint-disabl
 const argon2bundled_base64 = `AUTOINSERT_ARGON2BUNDLED__MIN__JS__BASE64`; // eslint-disable-line
 const qrcode_base64 = `AUTOINSERT_QRCODE__MIN__JS__BASE64`; // eslint-disable-line
 const marked_base64 = `AUTOINSERT_MARKED__MIN__JS__BASE64`; // eslint-disable-line
+
+// SVG marks: favicon is the keyhole+hash seal; icon is the full envelope used
+// for link previews. Spliced raw (no backticks/${} in the files).
+const favicon_svg = `AUTOINSERT_FAVICON__SVG`; // eslint-disable-line
+const icon_svg = `AUTOINSERT_ICON__SVG`; // eslint-disable-line
 
 const ENCODING_LEN = ENCODING.length;
 const TIME_LEN = 10;
@@ -552,17 +555,14 @@ expires at: ${responseData.expires_at}`;
       // return about/docs page
       const about_page = `AUTOINSERT_ABOUT__HTML`; // eslint-disable-line
       return buildResponse(about_page, DEFAULT_MIME_HTML, {}, 200, url);
-    } else if (url.pathname === "/favicon.ico") {
-      // returning binary requires UTF-16 JS strings to be converted to ie) UTF-8 bytes
-      return buildResponse(
-        str2ab(atob(favicon_gzip)),
-        "image/x-icon",
-        Object.assign({
-          "Content-Encoding": "gzip"
-        }, CACHE_STATIC),
-        200,
-        url,
-      );
+    } else if (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico") {
+      // both paths serve the SVG favicon (keyhole + hash). modern browsers honor
+      // the SVG via the <link rel="icon"> in each page; the /favicon.ico fallback
+      // returns the same SVG for clients that request the legacy path directly.
+      return buildResponse(favicon_svg, "image/svg+xml", CACHE_STATIC, 200, url);
+    } else if (url.pathname === "/icon.svg") {
+      // the full envelope mark, used as the link-preview (og:image) image
+      return buildResponse(icon_svg, "image/svg+xml", CACHE_STATIC, 200, url);
     } else {
       return buildResponse(
         `You probably want ${url.host}/post, not ${url.pathname}!`,
@@ -991,6 +991,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   let contentAsHtmlFromMarked = "";
   let imageUrl = "";
   let description = "";
+  // link-preview image: the uploaded image itself when there is one, else the
+  // site icon so text/encrypted/binary posts still get a branded card
+  const iconUrl = url ? `${url.protocol}//${url.host}/icon.svg` : "/icon.svg";
   // future use
   const encodedPayload = "";
   // strip non-url characters from description
@@ -1024,6 +1027,8 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     imageUrl = url.toString() + (url.search ? "&raw" : "?raw");
     injectorScript = "";
   }
+  // og:image uses the uploaded image when present, else the site icon
+  const previewImage = imageUrl || iconUrl;
   const contentAsWrappedHtml = `AUTOINSERT_GETPOST__HTML`; // eslint-disable-line
   return [contentAsWrappedHtml, type];
 }

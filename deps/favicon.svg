@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="GetPost">
+  <title>GetPost</title>
+  <desc>A keyhole over a hash — the encrypted seal and the fragment-key, GetPost's mark distilled for small sizes.</desc>
+
+  <!-- tile -->
+  <rect width="64" height="64" rx="14" fill="#0d0d0d"/>
+  <rect x="0.75" y="0.75" width="62.5" height="62.5" rx="13.25" fill="none" stroke="#2a2a2a" stroke-width="1.5"/>
+
+  <!--
+    The '#' underneath, as a faint stamp filling the frame. It carries the
+    'fragment is the key' idea without competing with the keyhole on top.
+  -->
+  <g stroke="#2f6b47" stroke-width="3.4" stroke-linecap="round" opacity="0.9">
+    <line x1="26" y1="14" x2="22" y2="50"/>
+    <line x1="42" y1="14" x2="38" y2="50"/>
+    <line x1="15" y1="26" x2="51" y2="26"/>
+    <line x1="13" y1="38" x2="49" y2="38"/>
+  </g>
+
+  <!--
+    The keyhole, superimposed and dominant. Filled disc over the '#' so the
+    glyph shows only at the edges, reading as a stamp behind the seal.
+  -->
+  <g>
+    <circle cx="32" cy="30" r="12.5" fill="#0d0d0d"/>
+    <circle cx="32" cy="30" r="12.5" fill="none" stroke="#48bb78" stroke-width="4.2"/>
+    <circle cx="32" cy="27" r="4.4" fill="#48bb78"/>
+    <path d="M29.6 30 L34.4 30 L36 44 L28 44 Z" fill="#48bb78"/>
+  </g>
+</svg>

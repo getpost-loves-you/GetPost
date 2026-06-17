@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="GetPost">
+  <title>GetPost</title>
+  <desc>A sheet of paper sealing into an envelope around a keyhole — content posted and encrypted in one gesture. The seam doubles as a hash, the key GetPost keeps in the URL fragment.</desc>
+
+  <defs>
+    <!-- soft inner vignette so the tile reads as a lit object, not a flat fill -->
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#141a16"/>
+      <stop offset="100%" stop-color="#0d0d0d"/>
+    </radialGradient>
+    <!-- the terminal green, with a faint glow used sparingly -->
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- tile -->
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#bg)"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="103.5" fill="none" stroke="#2a2a2a" stroke-width="3"/>
+
+  <!--
+    The envelope. Drawn as if a sheet of paper is folding shut: the body is the
+    sealed letter, the V is the flap mid-close. Everything is line work in the
+    site's #48bb78, the way the UI draws its borders.
+  -->
+  <g fill="none" stroke="#48bb78" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+
+    <!-- envelope body -->
+    <rect x="112" y="160" width="288" height="216" rx="22" filter="url(#glow)"/>
+
+    <!-- the closing flap: a paper fold caught mid-seal, stopping above the seal -->
+    <path d="M112 182 L256 282 L400 182" filter="url(#glow)"/>
+
+    <!--
+      A second, lighter fold line behind the flap — the "sheet" the flap came
+      from. Dimmed so it reads as paper underneath, giving the post-becomes-
+      envelope motion.
+    -->
+    <path d="M146 160 L256 240 L366 160" stroke="#2f6b47" stroke-width="9"/>
+  </g>
+
+  <!--
+    The seal: a keyhole, not a wax blob. This is the whole idea of GetPost —
+    the content is locked, and the key is something you carry, not something
+    the server holds. Filled green so the eye lands here last and rests. Sits
+    clear of the flap point, centered between fold and base.
+  -->
+  <g filter="url(#glow)">
+    <circle cx="256" cy="318" r="29" fill="#0d0d0d" stroke="#48bb78" stroke-width="12"/>
+    <circle cx="256" cy="312" r="10.5" fill="#48bb78"/>
+    <path d="M250 318 L262 318 L265.5 347 L246.5 347 Z" fill="#48bb78"/>
+  </g>
+
+  <!--
+    The hash, done right this time: a small, properly-formed '#' stamped on the
+    envelope below the seal. In GetPost the '#' fragment IS the key - it stays
+    in the URL and never reaches the server - so the glyph belongs on the mark.
+    Dim green: a quiet stamp you notice on the second look, not a shout.
+  -->
+  <g stroke="#2f6b47" stroke-width="6" stroke-linecap="round" opacity="0.9">
+    <line x1="244" y1="350" x2="240" y2="374"/>
+    <line x1="272" y1="350" x2="268" y2="374"/>
+    <line x1="234" y1="358" x2="278" y2="358"/>
+    <line x1="232" y1="366" x2="276" y2="366"/>
+  </g>
+</svg>
