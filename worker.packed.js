@@ -3041,11 +3041,20 @@ body {
 
     function displayDecryptedContent(decryptedData) {
         var decryptedDiv = document.getElementById('decryptedContent');
-        var dataString = new TextDecoder('utf-8').decode(decryptedData);
+
+        // decode as strict utf-8: invalid byte sequences throw, which is our
+        // signal that the payload is genuinely binary rather than text. a lenient
+        // decode would mangle binary into replacement chars and mis-render it.
+        var dataString = null;
+        try {
+            dataString = new TextDecoder('utf-8', { fatal: true }).decode(decryptedData);
+        } catch (e) {
+            dataString = null;
+        }
 
         // encrypted shortlink: a decrypted payload that is just a single-line
         // http/https URL gets the same countdown redirect as a plaintext one
-        if (isValidRedirectUrl(dataString.trim())) {
+        if (dataString !== null && isValidRedirectUrl(dataString.trim())) {
             showRedirectCountdown(dataString.trim());
             return;
         }
@@ -3054,12 +3063,17 @@ body {
 
         showDownloadBar(decryptedData);
 
-        var isPrintable = true;
-        for (var i = 0; i < Math.min(dataString.length, 1000); i++) {
-            var code = dataString.charCodeAt(i);
-            if (code > 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
-                isPrintable = false;
-                break;
+        // text vs binary: valid utf-8 (dataString !== null) with no NUL or stray
+        // control bytes is text. unicode code points above 127 are normal text
+        // (accents, smart quotes, em-dashes, emoji) and must NOT count as binary.
+        var isPrintable = dataString !== null;
+        if (isPrintable) {
+            for (var i = 0; i < Math.min(dataString.length, 1000); i++) {
+                var code = dataString.charCodeAt(i);
+                if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+                    isPrintable = false;
+                    break;
+                }
             }
         }
 
