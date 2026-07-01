@@ -197,6 +197,28 @@ curl -X POST "https://your-domain.com/post?key=ULID&del=DELETE_KEY"
 ```
 A `GET` on a delete link returns a confirmation page rather than deleting, so link-preview crawlers can't destroy content.
 
+### Named pastes (operator feature)
+Stable, human-readable paths at `/x/<name>`. Reads are public; writes and deletes
+require the operator secret (the `NAMED_KEY` binding, set at deploy time — absent
+means the feature is disabled and writes return 403).
+```bash
+# publish (Authorization: the NAMED_KEY secret)
+curl -X POST -H "Authorization: $NAMED_KEY" --data-binary @page.md "https://your-domain.com/x/welcome"
+
+# overwriting an existing name needs an explicit header (else 409)
+curl -X POST -H "Authorization: $NAMED_KEY" -H "X-I-Really-Mean-It: yes" --data-binary @page.md "https://your-domain.com/x/welcome"
+
+# public read / raw
+curl "https://your-domain.com/x/welcome?raw"
+
+# delete
+curl -X DELETE -H "Authorization: $NAMED_KEY" "https://your-domain.com/x/welcome"
+```
+Named pastes are permanent by default; a numeric `X-TTL` opts into expiry. Names match
+`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. Encrypted named pastes that link to each other carry
+the URL fragment (passphrase) forward across same-origin `/x/` links — one passphrase
+can navigate a whole set of E2E-encrypted pages.
+
 ### Debug
 ```
 GET /headers    # request headers + metadata, as JSON

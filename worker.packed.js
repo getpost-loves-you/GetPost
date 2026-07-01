@@ -1812,6 +1812,15 @@ X-TTL: 3600          # seconds until expiry
 # delete a post (deletion requires POST; GET shows a confirmation page)
 curl -X POST "https://your.domain/post?key=KEY&amp;del=DELETE_KEY"</code></pre>
 
+<h2>named pastes</h2>
+<p>Operator-published content at stable paths like <code>/x/welcome</code>. Anyone can read; publishing requires the instance operator's secret (set at deploy time &mdash; instances without it return 403).</p>
+<pre><code># publish (operator only)
+curl -X POST -H "Authorization: SECRET" --data-binary @page.md https://${url.host}/x/welcome
+
+# read (public)
+curl https://${url.host}/x/welcome?raw</code></pre>
+<p>Named pastes are permanent by default. Encrypted pages that link to other <code>/x/</code> pages carry the passphrase fragment forward &mdash; one link can unlock a whole set of E2E-encrypted pages.</p>
+
 <h2>deploy your own</h2>
 <p>GetPost runs on Cloudflare Workers &mdash; zero servers, global distribution, generous free tier (100k reads, 1k uploads daily).</p>
 <ul>
