@@ -88,6 +88,11 @@ EOF
     fi
 else
     # Original simple upload (for staging/testing without KV)
+    # secrets ride the bindings metadata, so without KV_NAMESPACE_NAME they are silently dropped
+    if [ -n "${NAMED_KEY:-}" ] || [ -n "${PERMANENT_KEY:-}" ]; then
+        echo "⚠ NAMED_KEY/PERMANENT_KEY set but KV_NAMESPACE_NAME is not - secret bindings will NOT be uploaded."
+        echo "  Add KV_NAMESPACE_NAME=<namespace title> to $CONFIG_FILE to enable them."
+    fi
     echo "► Uploading worker script '$SCRIPT_NAME' (no bindings)..."
     RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts/$SCRIPT_NAME" \
         -H  "Authorization: Bearer $CF_API_TOKEN" \
