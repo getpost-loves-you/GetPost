@@ -236,6 +236,19 @@ async function test(name, fn) {
 
   const detectText = (s) => detect(Array.from(new TextEncoder().encode(s)));
 
+  await test("non-ascii utf-8 stays text (accents, em-dash, emoji)", () => {
+    assert.strictEqual(detectText("# café zine — tést \u{1f389}")[1], "text/raw; charset=UTF-8");
+  });
+
+  await test("invalid utf-8 byte sequences detected as binary", () => {
+    // 0xff/0xfe never appear in valid utf-8 - strict decode must reject this
+    assert.strictEqual(detect([0xff, 0xfe, 0xfa, 0x01, 0x80, 0x81])[1], "application/octet-stream");
+  });
+
+  await test("valid utf-8 with stray control bytes detected as binary", () => {
+    assert.strictEqual(detect([0x68, 0x69, 0x01, 0x02, 0x03, 0x04])[1], "application/octet-stream");
+  });
+
   await test("single-line http url detected as text/x-url", () => {
     assert.strictEqual(detectText("https://example.com/some/path?q=1")[1], "text/x-url");
     assert.strictEqual(detectText("http://example.com/")[1], "text/x-url");

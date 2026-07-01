@@ -2143,14 +2143,25 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   // encrypted container: 0x00 "GPE1" + salt + nonce + ciphertext
   const isEncrypted = hex(contentAsUint8Array.slice(0, 5)) === "0047504531";
 
-  const contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
-  // checks to see if characters are all plausibly utf-8 / printable
+  // strict utf-8 decode: invalid byte sequences mean binary. a lenient decode
+  // would turn binary into replacement chars and mistake it for text.
+  let contentAsString = "";
   let contentIsPrintable = true;
-  for (let i = 0; i < Math.min(contentAsString.length, 1000); i++) {
-    const code = contentAsString.charCodeAt(i);
-    if (code > 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13)) {
-      contentIsPrintable = false;
-      break;
+  try {
+    contentAsString = new TextDecoder("utf-8", { fatal: true }).decode(contentAsUint8Array);
+  } catch (e) {
+    contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
+    contentIsPrintable = false;
+  }
+  // valid utf-8 with no stray control bytes is text; code points above 127
+  // (accents, smart quotes, emoji) are normal text and must NOT count as binary
+  if (contentIsPrintable) {
+    for (let i = 0; i < Math.min(contentAsString.length, 1000); i++) {
+      const code = contentAsString.charCodeAt(i);
+      if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+        contentIsPrintable = false;
+        break;
+      }
     }
   }
   const header = hex(contentAsUint8Array.slice(0, 4));
