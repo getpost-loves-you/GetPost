@@ -2171,6 +2171,14 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   if (isEncrypted) {
     type = "application/x-encrypted";
     injectorScript = "";
+  } else if (header.slice(0, 6) === "ffd8ff") {
+    // all JPEGs start ff d8 ff; the fourth byte varies (e0-ee JFIF/EXIF/etc,
+    // db for quantization-table-first files) so match only the first three
+    type = "image/jpeg";
+  } else if (header.slice(0, 6) === "494433") {
+    // "ID3" - any ID3v2 tag version (v2.2/v2.3/v2.4); the fourth byte is the
+    // version and v2.3 (03) is far more common than v2.4 (04)
+    type = "audio/mp3";
   } else {
   // matches the first four bytes of the uploaded file
   switch (header) {
@@ -2192,9 +2200,6 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
       break;
     case "47494638":
       type = "image/gif";
-      break;
-    case "49443304":
-      type = "audio/mp3";
       break;
     case "504b0304":
       type = "application/zip";
@@ -2220,13 +2225,6 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
       } else {
         type = "application/octet-stream";
       }
-      break;
-    case "ffd8ffe0":
-    case "ffd8ffe1":
-    case "ffd8ffe2":
-    case "ffd8ffe3":
-    case "ffd8ffe8":
-      type = "image/jpeg";
       break;
     default:
       if (contentIsPrintable === true) {

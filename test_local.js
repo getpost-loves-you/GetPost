@@ -220,6 +220,18 @@ async function test(name, fn) {
     assert.ok(html.includes("window.location.assign(window.location.href"));
   });
 
+  await test("jpeg detected for any ffd8ff prefix (jfif, exif, quant-table-first)", () => {
+    assert.strictEqual(detect([0xff, 0xd8, 0xff, 0xe0, 1, 2])[1], "image/jpeg");
+    assert.strictEqual(detect([0xff, 0xd8, 0xff, 0xdb, 1, 2])[1], "image/jpeg");
+    assert.strictEqual(detect([0xff, 0xd8, 0xff, 0xee, 1, 2])[1], "image/jpeg");
+  });
+
+  await test("mp3 detected for any ID3v2 version", () => {
+    assert.strictEqual(detect([0x49, 0x44, 0x33, 0x03, 0, 0])[1], "audio/mp3"); // v2.3
+    assert.strictEqual(detect([0x49, 0x44, 0x33, 0x04, 0, 0])[1], "audio/mp3"); // v2.4
+    assert.strictEqual(detect([0x49, 0x44, 0x33, 0x02, 0, 0])[1], "audio/mp3"); // v2.2
+  });
+
   await test("webm, ogg, flac magics detected", () => {
     assert.strictEqual(detect([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4])[1], "video/webm");
     assert.strictEqual(detect([0x4f, 0x67, 0x67, 0x53, 1, 2, 3, 4])[1], "audio/ogg");
