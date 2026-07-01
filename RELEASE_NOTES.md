@@ -1,3 +1,6 @@
+ * v2.0.3 - Fixes UTF-8 text (accents, smart quotes, emoji) being mis-detected as binary by the decrypted-content viewer; strict UTF-8 decoding now separates text from binary correctly.
+ * v2.0.2 - Adds raster fallbacks (multi-size favicon.ico, 512px icon.png) for clients that won't parse SVG - link-preview crawlers, Signal, older browsers.
+ * v2.0.1 - New SVG icon and favicon (keyhole + hash seal, envelope mark), wired into link previews and the favicon route.
  * v2.0.0 - End-to-end encryption becomes the headline: in-browser NaCl SecretBox + Argon2id, the GPE1 container format, a self-hosted encrypted CLI client, and a passphrase that never reaches the server. Also: expanded MIME detection (WebP/SVG/WebM/Ogg/FLAC/WAV) with code-fence rendering for source, edge caching with purge-on-delete, operator PERMANENT_KEY for no-expiry posts, POST-gated deletion, a 10MB cap, and a rewritten two-layer test suite (offline unit + live e2e).
  * v1.2.0 - Rewrites upload.html, adds footer to rendered markdown, in attempt to foster virality. Lots of improvements.
  * v1.1.2 - Adds `&cors` URL parameter to add CORS headers to embed content from a getpost.
