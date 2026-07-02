@@ -1,3 +1,4 @@
+ * v2.0.4 - Fixes the server-side twin of the 2.0.3 bug: unencrypted UTF-8 text no longer mis-typed as binary. Broader magic detection (all JPEG variants, all ID3v2 tag versions for MP3). Named pastes documented in README and /about; deploy.sh warns when secret bindings would be silently skipped.
  * v2.0.3 - Fixes UTF-8 text (accents, smart quotes, emoji) being mis-detected as binary by the decrypted-content viewer; strict UTF-8 decoding now separates text from binary correctly.
  * v2.0.2 - Adds raster fallbacks (multi-size favicon.ico, 512px icon.png) for clients that won't parse SVG - link-preview crawlers, Signal, older browsers.
  * v2.0.1 - New SVG icon and favicon (keyhole + hash seal, envelope mark), wired into link previews and the favicon route.
