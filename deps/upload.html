@@ -108,22 +108,49 @@ body {
 
 #textInput.active { display: block; }
 
-.file-meta {
+.file-list {
     display: none;
     text-align: left;
     font-size: 13px;
     width: 100%;
-    max-width: 400px;
+    max-width: 480px;
+    max-height: 100%;
+    overflow-y: auto;
+    padding: 0 1rem;
 }
 
-.file-meta .line {
-    color: #666;
-    margin: 0.2rem 0;
+.file-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.25rem 0;
 }
 
-.file-meta .val {
+.file-row .fname {
     color: #48bb78;
+    flex: 1;
+    overflow-wrap: anywhere;
 }
+
+.file-row .fsize {
+    color: #666;
+    white-space: nowrap;
+}
+
+.file-row.too-big .fname,
+.file-row.too-big .fsize { color: #e53e3e; }
+
+.file-remove {
+    background: none;
+    border: none;
+    color: #555;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0 0.2rem;
+}
+
+.file-remove:hover { color: #e53e3e; }
 
 .status-line {
     margin-top: 0.4rem;
@@ -330,6 +357,59 @@ body {
 .delete-url a { color: #777; text-decoration: none; }
 .delete-url a:hover { color: #e53e3e; }
 
+.result-list {
+    text-align: left;
+    font-size: 12px;
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+.result-row {
+    margin: 0.6rem 0;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #222;
+    border-radius: 2px;
+}
+
+.result-row .rname { color: #888; }
+
+.result-row .rlink {
+    display: block;
+    color: #48bb78;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    margin-top: 0.2rem;
+}
+
+.result-row .rlink:hover { text-decoration: underline; }
+
+.result-row .rdel {
+    display: block;
+    font-size: 11px;
+    color: #555;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    margin-top: 0.2rem;
+}
+
+.result-row .rdel:hover { color: #e53e3e; }
+
+.copy-all-btn {
+    display: none;
+    background: none;
+    border: 1px solid #48bb78;
+    border-radius: 2px;
+    color: #48bb78;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    margin-top: 0.5rem;
+}
+
+.copy-all-btn:hover { background: rgba(72, 187, 120, 0.1); }
+
 .bottom {
     display: flex;
     justify-content: space-between;
@@ -366,12 +446,8 @@ input[type="file"] { display: none; }
 <div class="prompt">$ upload <span class="cursor"></span></div>
 
 <div class="drop-zone" id="dropZone" onclick="dropZoneClick()">
-    <p id="dropHint">drop file here, click to select, or <a href="#" id="pasteToggle">paste text</a></p>
-    <div class="file-meta" id="fileMeta">
-        <div class="line">name: <span class="val" id="metaName"></span></div>
-        <div class="line">type: <span class="val" id="metaType"></span></div>
-        <div class="line">size: <span class="val" id="metaSize"></span></div>
-    </div>
+    <p id="dropHint">drop files here, click to select, or <a href="#" id="pasteToggle">paste text</a></p>
+    <div class="file-list" id="fileList"></div>
     <textarea id="textInput" placeholder="type or paste text here" spellcheck="false"></textarea>
     <div class="line status-line" id="statusLine"></div>
 </div>
@@ -402,6 +478,8 @@ input[type="file"] { display: none; }
     <div class="share-url" id="shareUrl" onclick="copyShareUrl()"></div>
     <div class="copy-hint" id="copyHint">click to copy</div>
     <div class="delete-url" id="deleteUrl"></div>
+    <div class="result-list" id="resultList"></div>
+    <button class="copy-all-btn" id="copyAllBtn" onclick="copyAllLinks()">copy all links</button>
 </div>
 
 <div class="bottom">
@@ -409,7 +487,7 @@ input[type="file"] { display: none; }
     <span>curl --data-binary @file https://${url.host}/post &mdash; stored unencrypted</span>
 </div>
 
-<input type="file" id="fileInput">
+<input type="file" id="fileInput" multiple>
 
 <script src="/naclfast.min.js"></script>
 <script src="/argon2bundled.min.js"></script>
@@ -443,9 +521,16 @@ function setEncryptMode(on) {
     document.getElementById('passphrase').style.display = on ? '' : 'none';
     document.getElementById('diceBtn').style.display = on ? '' : 'none';
     document.getElementById('plaintextWarning').classList.toggle('active', !on);
-    var btn = document.getElementById('uploadBtn');
-    btn.textContent = on ? 'upload' : 'upload unencrypted';
-    btn.classList.toggle('plain', !on);
+    document.getElementById('uploadBtn').classList.toggle('plain', !on);
+    updateUploadLabel();
+}
+
+// button reads "upload", "upload 3 files", "upload unencrypted", etc.
+function updateUploadLabel() {
+    var on = document.getElementById('encryptToggle').checked;
+    var n = textMode ? 1 : selectedFiles.length;
+    var word = on ? 'upload' : 'upload unencrypted';
+    document.getElementById('uploadBtn').textContent = n > 1 ? word + ' ' + n + ' files' : word;
 }
 
 function formatSize(bytes) {
@@ -454,35 +539,86 @@ function formatSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-function showFile(f) {
-    document.getElementById('dropHint').style.display = 'none';
-    const meta = document.getElementById('fileMeta');
-    meta.style.display = 'block';
-    document.getElementById('metaName').textContent = f.name;
-    document.getElementById('metaType').textContent = f.type || 'application/octet-stream';
-    document.getElementById('metaSize').textContent = formatSize(f.size);
+var selectedFiles = []; // entries: { file, buffer }
+var currentShareUrl = '';
+var textMode = false;
 
-    // clear any previous status
-    document.getElementById('statusLine').innerHTML = '';
-    document.getElementById('statusLine').className = 'line status-line';
+// append newly chosen files to the list (dropping twice accumulates);
+// buffers start reading immediately so upload doesn't wait on disk
+function addFiles(fileListLike) {
+    exitTextMode();
+    for (var i = 0; i < fileListLike.length; i++) {
+        (function(f) {
+            var entry = { file: f, buffer: null };
+            selectedFiles.push(entry);
+            f.arrayBuffer().then(function(buf) { entry.buffer = buf; });
+        })(fileListLike[i]);
+    }
+    renderFileList();
+}
 
-    if (f.size > 10 * 1024 * 1024) {
-        setStatus('error: file exceeds the 10MB limit', 'err');
-        document.getElementById('passwordSection').classList.remove('active');
+function removeFile(idx) {
+    selectedFiles.splice(idx, 1);
+    renderFileList();
+}
+
+function renderFileList() {
+    var listEl = document.getElementById('fileList');
+    var hint = document.getElementById('dropHint');
+    var pw = document.getElementById('passwordSection');
+    listEl.innerHTML = '';
+
+    if (selectedFiles.length === 0) {
+        listEl.style.display = 'none';
+        hint.style.display = '';
+        pw.classList.remove('active');
+        setStatus('');
         return;
     }
 
-    var pw = document.getElementById('passwordSection');
+    hint.style.display = 'none';
+    listEl.style.display = 'block';
+
+    var anyTooBig = false;
+    selectedFiles.forEach(function(entry, idx) {
+        var row = document.createElement('div');
+        row.className = 'file-row';
+        var name = document.createElement('span');
+        name.className = 'fname';
+        name.textContent = entry.file.name;
+        var size = document.createElement('span');
+        size.className = 'fsize';
+        size.textContent = formatSize(entry.file.size);
+        var rm = document.createElement('button');
+        rm.className = 'file-remove';
+        rm.textContent = '[x]';
+        rm.title = 'remove';
+        rm.addEventListener('click', function(e) {
+            e.stopPropagation(); // don't open the file picker
+            removeFile(idx);
+        });
+        if (entry.file.size > 10 * 1024 * 1024) {
+            row.classList.add('too-big');
+            anyTooBig = true;
+        }
+        row.appendChild(name);
+        row.appendChild(size);
+        row.appendChild(rm);
+        listEl.appendChild(row);
+    });
+
+    if (anyTooBig) {
+        setStatus('error: files over the 10MB limit - remove them to continue', 'err');
+    } else {
+        setStatus('');
+    }
+
     pw.classList.add('active');
     if (!document.getElementById('passphrase').value) {
         document.getElementById('passphrase').value = generatePassphrase();
     }
+    updateUploadLabel();
 }
-
-var selectedFile = null;
-var fileBuffer = null;
-var currentShareUrl = '';
-var textMode = false;
 
 function dropZoneClick() {
     if (textMode) return;
@@ -491,11 +627,10 @@ function dropZoneClick() {
 
 function enterTextMode() {
     textMode = true;
-    selectedFile = null;
-    fileBuffer = null;
+    selectedFiles = [];
     document.getElementById('dropZone').classList.add('text-mode');
     document.getElementById('dropHint').style.display = 'none';
-    document.getElementById('fileMeta').style.display = 'none';
+    document.getElementById('fileList').style.display = 'none';
     var ta = document.getElementById('textInput');
     ta.classList.add('active');
     ta.focus();
@@ -503,6 +638,7 @@ function enterTextMode() {
     if (!document.getElementById('passphrase').value) {
         document.getElementById('passphrase').value = generatePassphrase();
     }
+    updateUploadLabel();
 }
 
 function exitTextMode() {
@@ -551,6 +687,78 @@ function copyShareUrl() {
     });
 }
 
+var lastResults = [];
+var NL = String.fromCharCode(10);
+
+// one file keeps the QR flow; several files become a list of link cards
+function showResults(results) {
+    lastResults = results;
+    var qrcodeDiv = document.getElementById('qrcode');
+    var shareUrlDiv = document.getElementById('shareUrl');
+    var copyHint = document.getElementById('copyHint');
+    var deleteUrlDiv = document.getElementById('deleteUrl');
+    var listEl = document.getElementById('resultList');
+    var copyAll = document.getElementById('copyAllBtn');
+    listEl.innerHTML = '';
+
+    if (results.length === 1) {
+        qrcodeDiv.style.display = '';
+        shareUrlDiv.style.display = '';
+        copyHint.style.display = '';
+        copyAll.style.display = 'none';
+        showQRCode(results[0].shareUrl);
+        showDeleteUrl(results[0].deleteUrl);
+        return;
+    }
+
+    qrcodeDiv.innerHTML = '';
+    qrcodeDiv.style.display = 'none';
+    shareUrlDiv.style.display = 'none';
+    copyHint.style.display = 'none';
+    deleteUrlDiv.innerHTML = '';
+
+    results.forEach(function(r) {
+        var row = document.createElement('div');
+        row.className = 'result-row';
+        var name = document.createElement('span');
+        name.className = 'rname';
+        name.textContent = r.name;
+        var link = document.createElement('a');
+        link.className = 'rlink';
+        link.href = r.shareUrl;
+        link.textContent = r.shareUrl;
+        link.title = 'click to copy';
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            navigator.clipboard.writeText(r.shareUrl);
+            name.textContent = r.name + ' - copied!';
+            setTimeout(function() { name.textContent = r.name; }, 2000);
+        });
+        row.appendChild(name);
+        row.appendChild(link);
+        if (r.deleteUrl) {
+            var del = document.createElement('a');
+            del.className = 'rdel';
+            del.href = r.deleteUrl;
+            del.textContent = 'delete link: ' + r.deleteUrl;
+            row.appendChild(del);
+        }
+        listEl.appendChild(row);
+    });
+
+    copyAll.style.display = 'inline-block';
+    document.getElementById('qrSection').classList.add('active');
+}
+
+function copyAllLinks() {
+    var text = lastResults.map(function(r) { return r.name + ' ' + r.shareUrl; }).join(NL);
+    navigator.clipboard.writeText(text).then(function() {
+        var btn = document.getElementById('copyAllBtn');
+        btn.textContent = 'copied!';
+        setTimeout(function() { btn.textContent = 'copy all links'; }, 2000);
+    });
+}
+
 function setStatus(msg, cls) {
     var el = document.getElementById('statusLine');
     el.className = 'line status-line' + (cls ? ' ' + cls : '');
@@ -571,30 +779,67 @@ async function deriveKey(password, salt) {
     return new Uint8Array(result.hash);
 }
 
+// POST one payload to /post, reporting progress via the status line
+function uploadBlob(payload, progressLabel) {
+    return new Promise(function(resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/post', true);
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.setRequestHeader('X-TTL', document.getElementById('ttlSelect').value);
+        xhr.responseType = 'json';
+
+        xhr.upload.addEventListener('progress', function(e) {
+            if (e.lengthComputable) {
+                var pct = Math.round((e.loaded / e.total) * 100);
+                setStatus('<span class="spinner">|</span> uploading ' + progressLabel + pct + '%');
+            }
+        });
+
+        xhr.onload = function() {
+            if (xhr.response && xhr.response.share_url) {
+                resolve(xhr.response);
+            } else {
+                reject(new Error('unexpected response'));
+            }
+        };
+
+        xhr.onerror = function() { reject(new Error('upload failed')); };
+        xhr.send(new Blob([payload], { type: 'application/octet-stream' }));
+    });
+}
+
 async function doUpload() {
-    var uploadName, uploadType;
+    // gather everything to send as {name, type, bytes}
+    var uploads = [];
     if (textMode) {
         var text = document.getElementById('textInput').value;
         if (!text) {
             setStatus('error: nothing to paste', 'err');
             return;
         }
-        fileBuffer = new TextEncoder().encode(text).buffer;
-        uploadName = 'paste.txt';
-        uploadType = 'text/plain';
+        uploads.push({
+            name: 'paste.txt',
+            type: 'text/plain',
+            bytes: new TextEncoder().encode(text)
+        });
     } else {
-        if (!selectedFile) return;
-        if (!fileBuffer) {
-            // the read kicked off in handleFile may still be in flight for large files
-            fileBuffer = await selectedFile.arrayBuffer();
+        if (selectedFiles.length === 0) return;
+        for (var i = 0; i < selectedFiles.length; i++) {
+            var entry = selectedFiles[i];
+            if (!entry.buffer) {
+                // the read kicked off in addFiles may still be in flight for large files
+                entry.buffer = await entry.file.arrayBuffer();
+            }
+            if (entry.buffer.byteLength > 10 * 1024 * 1024) {
+                setStatus('error: ' + entry.file.name + ' exceeds the 10MB limit', 'err');
+                return;
+            }
+            uploads.push({
+                name: entry.file.name,
+                type: entry.file.type || 'application/octet-stream',
+                bytes: new Uint8Array(entry.buffer)
+            });
         }
-        uploadName = selectedFile.name;
-        uploadType = selectedFile.type || 'application/octet-stream';
-    }
-
-    if (fileBuffer.byteLength > 10 * 1024 * 1024) {
-        setStatus('error: content exceeds the 10MB limit', 'err');
-        return;
     }
 
     var encrypt = document.getElementById('encryptToggle').checked;
@@ -610,82 +855,56 @@ async function doUpload() {
     uploadBtn.style.cursor = 'not-allowed';
 
     try {
-        var output;
+        // one passphrase covers every file: derive the (slow) argon2id key once
+        // with a single salt, then give each file its own random nonce - secretbox
+        // key reuse across messages is safe as long as nonces are fresh
+        var key = null, salt = null;
         if (encrypt) {
-        // step 1: generate salt
-        setStatus('<span class="spinner">|</span> generating salt...');
-        await new Promise(function(r) { setTimeout(r, 50); });
-        var salt = nacl.randomBytes(16);
-
-        // step 2: derive key (the slow part)
-        setStatus('<span class="spinner">|</span> deriving key (argon2id)...');
-        await new Promise(function(r) { setTimeout(r, 50); });
-        var t0 = performance.now();
-        var key = await deriveKey(password, salt);
-        var keyMs = Math.round(performance.now() - t0);
-        setStatus('key derived in ' + (keyMs / 1000).toFixed(1) + 's, encrypting...');
-        await new Promise(function(r) { setTimeout(r, 50); });
-
-        // step 3: encrypt
-        var message = new Uint8Array(fileBuffer);
-        var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-        var ciphertext = nacl.secretbox(message, nonce, key);
-
-        var magic = [0, 0x47, 0x50, 0x45, 0x31]; // 0x00 "GPE1"
-        output = new Uint8Array(magic.length + salt.length + nonce.length + ciphertext.length);
-        output.set(magic, 0);
-        output.set(salt, magic.length);
-        output.set(nonce, magic.length + salt.length);
-        output.set(ciphertext, magic.length + salt.length + nonce.length);
-        } else {
-        // plaintext path: the bytes go up exactly as-is, like a curl upload
-        output = new Uint8Array(fileBuffer);
+            setStatus('<span class="spinner">|</span> deriving key (argon2id)...');
+            await new Promise(function(r) { setTimeout(r, 50); });
+            salt = nacl.randomBytes(16);
+            var t0 = performance.now();
+            key = await deriveKey(password, salt);
+            var keyMs = Math.round(performance.now() - t0);
+            setStatus('key derived in ' + (keyMs / 1000).toFixed(1) + 's, encrypting...');
+            await new Promise(function(r) { setTimeout(r, 50); });
         }
 
-        setStatus('<span class="spinner">|</span> uploading (' + formatSize(output.length) + ')...');
+        var results = [];
+        for (var i = 0; i < uploads.length; i++) {
+            var u = uploads[i];
+            var payload;
+            if (encrypt) {
+                var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+                var ciphertext = nacl.secretbox(u.bytes, nonce, key);
+                var magic = [0, 0x47, 0x50, 0x45, 0x31]; // 0x00 "GPE1"
+                payload = new Uint8Array(magic.length + salt.length + nonce.length + ciphertext.length);
+                payload.set(magic, 0);
+                payload.set(salt, magic.length);
+                payload.set(nonce, magic.length + salt.length);
+                payload.set(ciphertext, magic.length + salt.length + nonce.length);
+            } else {
+                // plaintext path: the bytes go up exactly as-is, like a curl upload
+                payload = u.bytes;
+            }
 
-        // step 4: upload with progress
-        await new Promise(function(resolve, reject) {
-            var xhr = new XMLHttpRequest();
-            xhr.open('POST', '/post', true);
-            xhr.setRequestHeader('Accept', 'application/json');
-            xhr.setRequestHeader('X-TTL', document.getElementById('ttlSelect').value);
-            xhr.responseType = 'json';
+            var progressLabel = uploads.length > 1 ?
+                (i + 1) + '/' + uploads.length + ' ' + u.name + '... ' : '... ';
+            var resp = await uploadBlob(payload, progressLabel);
 
-            xhr.upload.addEventListener('progress', function(e) {
-                if (e.lengthComputable) {
-                    var pct = Math.round((e.loaded / e.total) * 100);
-                    setStatus('<span class="spinner">|</span> uploading... ' + pct + '%');
-                }
-            });
+            // only encrypted uploads carry the passphrase fragment
+            var shareUrl = resp.share_url;
+            if (encrypt) {
+                shareUrl += '#;;;' +
+                    encodeURIComponent(password) + ';;;' +
+                    encodeURIComponent(u.type) + ';;;' +
+                    encodeURIComponent(u.name);
+            }
+            results.push({ name: u.name, shareUrl: shareUrl, deleteUrl: resp.delete_url });
+        }
 
-            xhr.onload = function() {
-                if (xhr.response && xhr.response.share_url) {
-                    // only encrypted uploads carry the passphrase fragment
-                    var shareUrl = xhr.response.share_url;
-                    if (encrypt) {
-                        shareUrl += '#;;;' +
-                            encodeURIComponent(password) + ';;;' +
-                            encodeURIComponent(uploadType) + ';;;' +
-                            encodeURIComponent(uploadName);
-                    }
-                    setStatus('done', 'ok');
-                    showQRCode(shareUrl);
-                    showDeleteUrl(xhr.response.delete_url);
-                    resolve();
-                } else {
-                    setStatus('error: unexpected response', 'err');
-                    reject(new Error('bad response'));
-                }
-            };
-
-            xhr.onerror = function() {
-                setStatus('error: upload failed', 'err');
-                reject(new Error('upload failed'));
-            };
-
-            xhr.send(new Blob([output], { type: 'application/octet-stream' }));
-        });
+        setStatus(results.length > 1 ? 'uploaded ' + results.length + ' files' : 'done', 'ok');
+        showResults(results);
 
     } catch (e) {
         setStatus('error: ' + e.message, 'err');
@@ -707,16 +926,12 @@ dropZone.addEventListener('dragleave', function() { dropZone.classList.remove('d
 dropZone.addEventListener('drop', function(e) {
     e.preventDefault();
     dropZone.classList.remove('dragover');
-    handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 });
-fileInput.addEventListener('change', function(e) { if (e.target.files[0]) handleFile(e.target.files[0]); });
-
-function handleFile(f) {
-    exitTextMode();
-    selectedFile = f;
-    f.arrayBuffer().then(function(buf) { fileBuffer = buf; });
-    showFile(f);
-}
+fileInput.addEventListener('change', function(e) {
+    if (e.target.files.length) addFiles(e.target.files);
+    e.target.value = ''; // allow re-picking the same file
+});
 
 document.getElementById('pasteToggle').addEventListener('click', function(e) {
     e.preventDefault();

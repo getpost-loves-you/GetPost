@@ -774,6 +774,8 @@ async function test(name, fn) {
       assert.ok(html.includes('id="dropZone"'), path + " has drop zone");
       assert.ok(html.includes('id="pasteToggle"'), path + " has paste mode");
       assert.ok(html.includes('id="encryptToggle" checked'), path + " has encrypt toggle, default on");
+      assert.ok(html.includes('id="fileInput" multiple'), path + " accepts multiple files");
+      assert.ok(html.includes('id="resultList"'), path + " has multi-result list");
     }
   });
 
