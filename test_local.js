@@ -773,6 +773,7 @@ async function test(name, fn) {
       const html = await (await call("GET", path)).text();
       assert.ok(html.includes('id="dropZone"'), path + " has drop zone");
       assert.ok(html.includes('id="pasteToggle"'), path + " has paste mode");
+      assert.ok(html.includes('id="encryptToggle" checked'), path + " has encrypt toggle, default on");
     }
   });
 

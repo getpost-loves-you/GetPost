@@ -159,6 +159,41 @@ body {
     font-size: 12px;
 }
 
+.encrypt-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: #666;
+    font-size: 12px;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    width: fit-content;
+}
+
+.encrypt-row input {
+    accent-color: #48bb78;
+    cursor: pointer;
+}
+
+.plaintext-warning {
+    display: none;
+    color: #d69e2e;
+    font-size: 12px;
+    margin-top: 0.4rem;
+}
+
+.plaintext-warning.active { display: block; }
+
+.upload-btn.plain {
+    border-color: #d69e2e;
+    color: #d69e2e;
+}
+
+.upload-btn.plain:hover {
+    background: rgba(214, 158, 46, 0.1);
+}
+
 .password-row {
     display: flex;
     gap: 0.5rem;
@@ -342,12 +377,14 @@ input[type="file"] { display: none; }
 </div>
 
 <div class="password-section" id="passwordSection">
-    <div class="password-label">passphrase (auto-generated, click to edit):</div>
+    <label class="encrypt-row"><input type="checkbox" id="encryptToggle" checked> encrypt (e2e)</label>
+    <div class="password-label" id="passphraseLabel">passphrase (auto-generated, click to edit):</div>
     <div class="password-row">
         <input type="text" id="passphrase" readonly onfocus="this.select(); this.removeAttribute('readonly');" onblur="this.setAttribute('readonly', true);">
-        <button class="dice-btn" onclick="regeneratePassphrase()" title="regenerate">[dice]</button>
+        <button class="dice-btn" id="diceBtn" onclick="regeneratePassphrase()" title="regenerate">[dice]</button>
         <button class="upload-btn active" id="uploadBtn" onclick="doUpload()">upload</button>
     </div>
+    <div class="plaintext-warning" id="plaintextWarning">! stored in plaintext on the server &mdash; anyone with the link can read it</div>
     <div class="ttl-row">
         <label for="ttlSelect">expires:</label>
         <select id="ttlSelect">
@@ -397,6 +434,18 @@ function generatePassphrase() {
 
 function regeneratePassphrase() {
     document.getElementById('passphrase').value = generatePassphrase();
+}
+
+// default is always encrypted; unchecking swaps the passphrase row for an
+// amber plaintext warning and relabels the button so the state is unmissable
+function setEncryptMode(on) {
+    document.getElementById('passphraseLabel').style.display = on ? '' : 'none';
+    document.getElementById('passphrase').style.display = on ? '' : 'none';
+    document.getElementById('diceBtn').style.display = on ? '' : 'none';
+    document.getElementById('plaintextWarning').classList.toggle('active', !on);
+    var btn = document.getElementById('uploadBtn');
+    btn.textContent = on ? 'upload' : 'upload unencrypted';
+    btn.classList.toggle('plain', !on);
 }
 
 function formatSize(bytes) {
@@ -548,8 +597,9 @@ async function doUpload() {
         return;
     }
 
+    var encrypt = document.getElementById('encryptToggle').checked;
     var password = document.getElementById('passphrase').value;
-    if (!password) {
+    if (encrypt && !password) {
         setStatus('error: passphrase is empty', 'err');
         return;
     }
@@ -560,6 +610,8 @@ async function doUpload() {
     uploadBtn.style.cursor = 'not-allowed';
 
     try {
+        var output;
+        if (encrypt) {
         // step 1: generate salt
         setStatus('<span class="spinner">|</span> generating salt...');
         await new Promise(function(r) { setTimeout(r, 50); });
@@ -580,11 +632,15 @@ async function doUpload() {
         var ciphertext = nacl.secretbox(message, nonce, key);
 
         var magic = [0, 0x47, 0x50, 0x45, 0x31]; // 0x00 "GPE1"
-        var output = new Uint8Array(magic.length + salt.length + nonce.length + ciphertext.length);
+        output = new Uint8Array(magic.length + salt.length + nonce.length + ciphertext.length);
         output.set(magic, 0);
         output.set(salt, magic.length);
         output.set(nonce, magic.length + salt.length);
         output.set(ciphertext, magic.length + salt.length + nonce.length);
+        } else {
+        // plaintext path: the bytes go up exactly as-is, like a curl upload
+        output = new Uint8Array(fileBuffer);
+        }
 
         setStatus('<span class="spinner">|</span> uploading (' + formatSize(output.length) + ')...');
 
@@ -605,10 +661,14 @@ async function doUpload() {
 
             xhr.onload = function() {
                 if (xhr.response && xhr.response.share_url) {
-                    var shareUrl = xhr.response.share_url + '#;;;' +
-                        encodeURIComponent(password) + ';;;' +
-                        encodeURIComponent(uploadType) + ';;;' +
-                        encodeURIComponent(uploadName);
+                    // only encrypted uploads carry the passphrase fragment
+                    var shareUrl = xhr.response.share_url;
+                    if (encrypt) {
+                        shareUrl += '#;;;' +
+                            encodeURIComponent(password) + ';;;' +
+                            encodeURIComponent(uploadType) + ';;;' +
+                            encodeURIComponent(uploadName);
+                    }
                     setStatus('done', 'ok');
                     showQRCode(shareUrl);
                     showDeleteUrl(xhr.response.delete_url);
@@ -662,6 +722,10 @@ document.getElementById('pasteToggle').addEventListener('click', function(e) {
     e.preventDefault();
     e.stopPropagation(); // don't trigger the drop zone's file picker
     enterTextMode();
+});
+
+document.getElementById('encryptToggle').addEventListener('change', function() {
+    setEncryptMode(this.checked);
 });
 </script>
 </body>
