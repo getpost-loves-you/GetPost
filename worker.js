@@ -969,17 +969,17 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   } // end encrypted check
 
   switch (type) {
+    case "application/x-encrypted":
+      // Encrypted content - let the HTML wrapper handle decryption
+      injectorScript = "";
+      break;
     case "image/png":
     case "image/gif":
     case "image/jpeg":
     case "image/webp":
     case "image/svg+xml":
-      // images render inline below via the imageUrl branch
-      break;
-    case "application/x-encrypted":
-      // Encrypted content - let the HTML wrapper handle decryption
-      injectorScript = "";
-      break;
+      // browsers render these natively - send them to raw like pdf/video;
+      // crawlers don't run the JS redirect so og:image previews still work
     case "audio/mp3":
     case "audio/ogg":
     case "audio/flac":
@@ -1041,9 +1041,10 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     description = "GetPost: " + type;
   }
   if (type.startsWith("image/")) {
+    // still set for og:image link previews; the browser itself never lingers
+    // on this page (the injector redirects it to the raw bytes)
     // /post?key=... pages already have a query string; /x/<name> pages do not
     imageUrl = url.toString() + (url.search ? "&raw" : "?raw");
-    injectorScript = "";
   }
   // og:image uses the uploaded image when present, else the site icon
   const previewImage = imageUrl || iconUrl;

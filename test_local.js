@@ -208,10 +208,16 @@ async function test(name, fn) {
     assert.strictEqual(type, "application/pdf");
   });
 
-  await test("webp detected via RIFF+WEBP, renders inline", () => {
+  await test("webp detected via RIFF+WEBP, redirects to raw like other media", () => {
     const [html, type] = detect([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
     assert.strictEqual(type, "image/webp");
-    assert.ok(!html.includes("window.location.assign(window.location.href"));
+    assert.ok(html.includes("window.location.assign(window.location.href"));
+  });
+
+  await test("image pages keep og:image pointed at the raw bytes for previews", () => {
+    const [html] = detect([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert.ok(/og:image" content="[^"]*[?&]raw"/.test(html), "og:image uses the raw url");
+    assert.ok(html.includes("window.location.assign(window.location.href"), "browser redirects to raw");
   });
 
   await test("wav detected via RIFF+WAVE, redirects to raw", () => {
