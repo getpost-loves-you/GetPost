@@ -454,6 +454,7 @@ input[type="file"] { display: none; }
 
 <div class="password-section" id="passwordSection">
     <label class="encrypt-row"><input type="checkbox" id="encryptToggle" checked> encrypt (e2e)</label>
+    <label class="encrypt-row" id="indexRow" style="display: none;"><input type="checkbox" id="indexToggle"> create index page (one link listing all files)</label>
     <div class="password-label" id="passphraseLabel">passphrase (auto-generated, click to edit):</div>
     <div class="password-row">
         <input type="text" id="passphrase" readonly onfocus="this.select(); this.removeAttribute('readonly');" onblur="this.setAttribute('readonly', true);">
@@ -613,6 +614,9 @@ function renderFileList() {
         setStatus('');
     }
 
+    // the index option only makes sense for a batch
+    document.getElementById('indexRow').style.display = selectedFiles.length > 1 ? 'flex' : 'none';
+
     pw.classList.add('active');
     if (!document.getElementById('passphrase').value) {
         document.getElementById('passphrase').value = generatePassphrase();
@@ -631,6 +635,7 @@ function enterTextMode() {
     document.getElementById('dropZone').classList.add('text-mode');
     document.getElementById('dropHint').style.display = 'none';
     document.getElementById('fileList').style.display = 'none';
+    document.getElementById('indexRow').style.display = 'none';
     var ta = document.getElementById('textInput');
     ta.classList.add('active');
     ta.focus();
@@ -690,9 +695,10 @@ function copyShareUrl() {
 var lastResults = [];
 var NL = String.fromCharCode(10);
 
-// one file keeps the QR flow; several files become a list of link cards
-function showResults(results) {
-    lastResults = results;
+// one file keeps the QR flow; several files become a list of link cards.
+// when an index post exists it is the thing you share: it gets the QR and
+// leads the list, with the per-file links below
+function showResults(results, indexRes) {
     var qrcodeDiv = document.getElementById('qrcode');
     var shareUrlDiv = document.getElementById('shareUrl');
     var copyHint = document.getElementById('copyHint');
@@ -701,7 +707,9 @@ function showResults(results) {
     var copyAll = document.getElementById('copyAllBtn');
     listEl.innerHTML = '';
 
-    if (results.length === 1) {
+    lastResults = indexRes ? [indexRes].concat(results) : results;
+
+    if (results.length === 1 && !indexRes) {
         qrcodeDiv.style.display = '';
         shareUrlDiv.style.display = '';
         copyHint.style.display = '';
@@ -711,11 +719,19 @@ function showResults(results) {
         return;
     }
 
-    qrcodeDiv.innerHTML = '';
-    qrcodeDiv.style.display = 'none';
-    shareUrlDiv.style.display = 'none';
-    copyHint.style.display = 'none';
-    deleteUrlDiv.innerHTML = '';
+    if (indexRes) {
+        qrcodeDiv.style.display = '';
+        shareUrlDiv.style.display = '';
+        copyHint.style.display = '';
+        showQRCode(indexRes.shareUrl);
+        showDeleteUrl(indexRes.deleteUrl);
+    } else {
+        qrcodeDiv.innerHTML = '';
+        qrcodeDiv.style.display = 'none';
+        shareUrlDiv.style.display = 'none';
+        copyHint.style.display = 'none';
+        deleteUrlDiv.innerHTML = '';
+    }
 
     results.forEach(function(r) {
         var row = document.createElement('div');
@@ -903,8 +919,48 @@ async function doUpload() {
             results.push({ name: u.name, shareUrl: shareUrl, deleteUrl: resp.delete_url });
         }
 
-        setStatus(results.length > 1 ? 'uploaded ' + results.length + ' files' : 'done', 'ok');
-        showResults(results);
+        // optional (N+1)th post: a markdown index linking every file. encrypted
+        // batches get an encrypted index - it embeds the fragment-bearing urls,
+        // which is fine because only passphrase holders can decrypt the index
+        var indexRes = null;
+        if (!textMode && uploads.length > 1 && document.getElementById('indexToggle').checked) {
+            var lines = ['# files', ''];
+            results.forEach(function(r) {
+                // NB: no backslash escapes in this embedded file - sanitize link
+                // text and url with split/join instead of regex escapes
+                var mdName = r.name.split('[').join('(').split(']').join(')');
+                var mdUrl = r.shareUrl.split('(').join('%28').split(')').join('%29');
+                lines.push('- [' + mdName + '](' + mdUrl + ')');
+            });
+            var indexBytes = new TextEncoder().encode(lines.join(NL) + NL);
+
+            var indexPayload;
+            if (encrypt) {
+                var inonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+                var ict = nacl.secretbox(indexBytes, inonce, key);
+                var imagic = [0, 0x47, 0x50, 0x45, 0x31];
+                indexPayload = new Uint8Array(imagic.length + salt.length + inonce.length + ict.length);
+                indexPayload.set(imagic, 0);
+                indexPayload.set(salt, imagic.length);
+                indexPayload.set(inonce, imagic.length + salt.length);
+                indexPayload.set(ict, imagic.length + salt.length + inonce.length);
+            } else {
+                indexPayload = indexBytes;
+            }
+
+            var iresp = await uploadBlob(indexPayload, 'index... ');
+            var indexShareUrl = iresp.share_url;
+            if (encrypt) {
+                indexShareUrl += '#;;;' + encodeURIComponent(password) +
+                    ';;;text%2Fmarkdown;;;index.md';
+            }
+            indexRes = { name: 'index', shareUrl: indexShareUrl, deleteUrl: iresp.delete_url };
+        }
+
+        setStatus(results.length > 1 ?
+            'uploaded ' + results.length + ' files' + (indexRes ? ' + index' : '') :
+            'done', 'ok');
+        showResults(results, indexRes);
 
     } catch (e) {
         setStatus('error: ' + e.message, 'err');

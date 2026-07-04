@@ -776,6 +776,7 @@ async function test(name, fn) {
       assert.ok(html.includes('id="encryptToggle" checked'), path + " has encrypt toggle, default on");
       assert.ok(html.includes('id="fileInput" multiple'), path + " accepts multiple files");
       assert.ok(html.includes('id="resultList"'), path + " has multi-result list");
+      assert.ok(html.includes('id="indexToggle"'), path + " has index-page option");
     }
   });
 
