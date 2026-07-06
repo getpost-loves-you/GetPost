@@ -256,6 +256,14 @@ async function test(name, fn) {
 
   const detectText = (s) => detect(Array.from(new TextEncoder().encode(s)));
 
+  await test("markdown image tags get loading=lazy (gallery indexes)", () => {
+    const [html] = detectText("![a](https://t.local/post?key=X&raw)" + "\n\n" + "![b](https://t.local/post?key=Y&raw)");
+    // both rendered body imgs carry the lazy attribute (the viewer JS contains
+    // '<img src=' string literals for decrypted blobs, so match the full tags)
+    assert.ok(html.includes('<img loading="lazy" src="https://t.local/post?key=X&raw"'));
+    assert.ok(html.includes('<img loading="lazy" src="https://t.local/post?key=Y&raw"'));
+  });
+
   await test("non-ascii utf-8 stays text (accents, em-dash, emoji)", () => {
     assert.strictEqual(detectText("# café zine — tést \u{1f389}")[1], "text/raw; charset=UTF-8");
   });

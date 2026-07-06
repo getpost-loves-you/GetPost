@@ -1024,6 +1024,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     } else {
       contentAsHtmlFromMarked = marked(text);
     }
+    // gallery indexes inline every original image; lazy-load so a long page
+    // fetches images on scroll instead of all up front
+    contentAsHtmlFromMarked = contentAsHtmlFromMarked.replace(/<img /g, '<img loading="lazy" ');
     // use the first 140 characters that aren't special, as the description!
     description = new TextDecoder("utf-8")
       .decode(new Uint8Array(content.slice(0, 140)))
