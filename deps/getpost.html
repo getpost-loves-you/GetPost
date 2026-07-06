@@ -125,13 +125,6 @@ body {
     margin: 2em 0;
 }
 
-/* image content */
-#content img {
-    max-width: 100%;
-    height: auto;
-    display: block;
-}
-
 /* decrypt interface */
 .decrypt-interface {
     max-width: 420px;
@@ -365,9 +358,9 @@ body {
         </div>
     </div>
 
-    <div id="content">
-        <img id="imgContent" src="${imageUrl}">
-    </div>
+    <!-- image posts redirect to raw before paint; nothing renders here anymore,
+         but the container stays because the redirect/decrypt flows hide it -->
+    <div id="content"></div>
     <div id="markdownContent">${contentAsHtmlFromMarked}</div>
     <div id="decryptedContent" class="hidden"></div>
 </div>

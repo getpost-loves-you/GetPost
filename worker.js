@@ -1041,8 +1041,8 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     description = "GetPost: " + type;
   }
   if (type.startsWith("image/")) {
-    // still set for og:image link previews; the browser itself never lingers
-    // on this page (the injector redirects it to the raw bytes)
+    // feeds og:image (via previewImage) only - browsers redirect to raw before
+    // paint, and crawlers read the meta tag without running the redirect.
     // /post?key=... pages already have a query string; /x/<name> pages do not
     imageUrl = url.toString() + (url.search ? "&raw" : "?raw");
   }

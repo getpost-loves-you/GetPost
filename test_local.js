@@ -217,7 +217,9 @@ async function test(name, fn) {
   await test("image pages keep og:image pointed at the raw bytes for previews", () => {
     const [html] = detect([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     assert.ok(/og:image" content="[^"]*[?&]raw"/.test(html), "og:image uses the raw url");
-    assert.ok(html.includes("window.location.assign(window.location.href"), "browser redirects to raw");
+    // no body <img> anymore - the page redirects, so an eager img fetch would
+    // download the image bytes twice
+    assert.ok(!html.includes('id="imgContent"'), "dead inline-image markup is gone");
   });
 
   await test("wav detected via RIFF+WAVE, redirects to raw", () => {
