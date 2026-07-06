@@ -1225,12 +1225,16 @@ async function doUpload() {
                     encodeURIComponent(u.type) + ';;;' +
                     encodeURIComponent(u.name);
             }
+            // link policy, decided once: plaintext images are addressable as
+            // bytes via raw; everything else (and anything encrypted) links the
+            // viewer page. inlineable marks candidates for the gallery index.
+            var isImage = u.type.indexOf('image/') === 0;
             results.push({
                 name: u.name,
                 shareUrl: shareUrl,
-                rawUrl: resp.raw_url,
-                deleteUrl: resp.delete_url,
-                isImage: u.type.indexOf('image/') === 0
+                linkUrl: (!encrypt && isImage) ? resp.raw_url : shareUrl,
+                inlineable: !encrypt && isImage,
+                deleteUrl: resp.delete_url
             });
         }
 
@@ -1239,29 +1243,18 @@ async function doUpload() {
         // which is fine because only passphrase holders can decrypt the index
         var indexRes = null;
         if (!textMode && uploads.length > 1 && document.getElementById('indexToggle').checked) {
-            // plaintext images can be addressed directly as bytes via &raw; for
-            // encrypted posts raw would serve ciphertext, so those always link
-            // to the viewer page (which decrypts with the fragment passphrase)
-            var allImages = results.every(function(r) { return r.isImage; });
-            var lines;
-            if (!encrypt && allImages) {
-                // pure image batch: inline every image - a scrollable gallery
-                lines = ['# gallery', ''];
-                results.forEach(function(r) {
-                    var mdName = r.name.split('[').join('(').split(']').join(')');
-                    lines.push('![' + mdName + '](' + r.rawUrl + ')');
-                });
-            } else {
-                lines = ['# files', ''];
-                results.forEach(function(r) {
-                    // NB: no backslash escapes in this embedded file - sanitize link
-                    // text and url with split/join instead of regex escapes
-                    var mdName = r.name.split('[').join('(').split(']').join(')');
-                    var target = (!encrypt && r.isImage) ? r.rawUrl : r.shareUrl;
-                    var mdUrl = target.split('(').join('%28').split(')').join('%29');
-                    lines.push('- [' + mdName + '](' + mdUrl + ')');
-                });
-            }
+            // a batch of pure plaintext images inlines them all - a scrollable
+            // gallery; otherwise a link list (per-result linkUrl carries the
+            // raw-vs-viewer policy decided at upload time)
+            var gallery = results.every(function(r) { return r.inlineable; });
+            var lines = [gallery ? '# gallery' : '# files', ''];
+            results.forEach(function(r) {
+                // NB: no backslash escapes in this embedded file - sanitize link
+                // text and url with split/join instead of regex escapes
+                var mdName = r.name.split('[').join('(').split(']').join(')');
+                var mdUrl = r.linkUrl.split('(').join('%28').split(')').join('%29');
+                lines.push((gallery ? '!' : '- ') + '[' + mdName + '](' + mdUrl + ')');
+            });
             var indexBytes = new TextEncoder().encode(lines.join(NL) + NL);
 
             var indexPayload;
