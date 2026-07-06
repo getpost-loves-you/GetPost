@@ -41,9 +41,10 @@ for fragment in re.findall(rb"`AUTOINSERT\w+`", INPUT_JS):
     )
     print("loading:", file_name.decode())
     file_substitution = read_file_from_deps(file_name)
-    # python sources are served verbatim, so escape template-literal specials -
-    # html deps are NOT escaped because they rely on ${} interpolation
-    if re.match(rb".+\.py", file_name):
+    # python sources and markdown docs are served verbatim, so escape
+    # template-literal specials - html deps are NOT escaped because they rely
+    # on ${} interpolation
+    if re.match(rb".+\.(py|md)", file_name):
         file_substitution = (
             file_substitution
                 .replace(b"\\", b"\\\\")

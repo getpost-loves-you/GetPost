@@ -566,6 +566,11 @@ expires at: ${responseData.expires_at}`;
       // return about/docs page
       const about_page = `AUTOINSERT_ABOUT__HTML`; // eslint-disable-line
       return buildResponse(about_page, DEFAULT_MIME_HTML, {}, 200, url);
+    } else if (url.pathname === "/api" || url.pathname === "/api.md" || url.pathname === "/llms.txt") {
+      // machine-readable API reference for programmatic/agent consumers, served
+      // verbatim as markdown (llms.txt convention points here too)
+      const api_doc = `AUTOINSERT_GETPOST_API__MD`; // eslint-disable-line
+      return buildResponse(api_doc, "text/markdown; charset=UTF-8", CACHE_STATIC, 200, url);
     } else if (url.pathname === "/favicon.svg") {
       // SVG favicon for browsers that accept it (via <link rel="icon">)
       return buildResponse(favicon_svg, "image/svg+xml", CACHE_STATIC, 200, url);

@@ -1,0 +1,1 @@
+../getpost-api.md

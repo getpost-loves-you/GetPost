@@ -175,6 +175,10 @@ node test_local.js       # offline unit tests — no deploy needed (node + pytho
 
 ## API Reference
 
+The complete machine-readable reference is [`getpost-api.md`](getpost-api.md), and every
+running instance self-hosts it at `/api` (also `/api.md` and `/llms.txt`) as `text/markdown`
+— point scripts or agents there. The essentials:
+
 ### Upload
 ```
 POST /post

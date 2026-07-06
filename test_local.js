@@ -861,6 +861,16 @@ async function test(name, fn) {
     assert.strictEqual(served, fs.readFileSync(__dirname + "/pastebin-crypted.py", "utf8"));
   });
 
+  await test("api doc served byte-identical as markdown at /api, /api.md, /llms.txt", async () => {
+    const repoCopy = fs.readFileSync(__dirname + "/getpost-api.md", "utf8");
+    for (const path of ["/api", "/api.md", "/llms.txt"]) {
+      const resp = await call("GET", path);
+      assert.strictEqual(resp.status, 200, path);
+      assert.ok((resp.headers.get("content-type") || "").includes("text/markdown"), path + " is markdown");
+      assert.strictEqual(await resp.text(), repoCopy, path + " byte-identical");
+    }
+  });
+
   await test("OPTIONS preflight and cors=1 set allow-origin", async () => {
     const pre = await call("OPTIONS", "/post");
     assert.strictEqual(pre.status, 204);
