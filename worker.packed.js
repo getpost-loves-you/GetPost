@@ -1356,15 +1356,9 @@ document.getElementById('encryptToggle').addEventListener('change', function() {
               url,
             );
           }
-          const [generatedBodyHtml, type] = generateHtmlBasedOnType(
-            contentFromKeyAsArrayBuffer,
-            url,
-            metadata,
-            customTitle
-          );
           if (raw) {
             // Check if custom content type is provided and validate it
-            let responseContentType = type;
+            let responseContentType;
             if (customContentType) {
               if (isValidContentType(customContentType)) {
                 responseContentType = customContentType;
@@ -1376,6 +1370,9 @@ document.getElementById('encryptToggle').addEventListener('change', function() {
                   url,
                 );
               }
+            } else {
+              // raw needs only the sniffed type - skip building the whole page
+              responseContentType = detectContent(contentFromKeyAsArrayBuffer).type;
             }
 
             // if requested as raw, return the original resp object with detected or custom MIME type
@@ -1389,6 +1386,12 @@ document.getElementById('encryptToggle').addEventListener('change', function() {
           }
           // otherwise, return the wrapped body with the text/html mimetype
           else {
+            const [generatedBodyHtml] = generateHtmlBasedOnType(
+              contentFromKeyAsArrayBuffer,
+              url,
+              metadata,
+              customTitle
+            );
             return cacheAndReturn(fetch_event, edgeCache, buildResponse(
               generatedBodyHtml,
               DEFAULT_MIME_HTML,
@@ -1588,14 +1591,8 @@ expires at: ${responseData.expires_at}`;
             url,
           );
         }
-        const [generatedBodyHtml, type] = generateHtmlBasedOnType(
-          contentFromKeyAsArrayBuffer,
-          url,
-          metadata,
-          customTitle
-        );
         if (raw) {
-          let responseContentType = type;
+          let responseContentType;
           if (customContentType) {
             if (isValidContentType(customContentType)) {
               responseContentType = customContentType;
@@ -1607,6 +1604,9 @@ expires at: ${responseData.expires_at}`;
                 url,
               );
             }
+          } else {
+            // raw needs only the sniffed type - skip building the whole page
+            responseContentType = detectContent(contentFromKeyAsArrayBuffer).type;
           }
           return cacheAndReturn(fetch_event, edgeCache, buildResponse(
             contentFromKeyAsArrayBuffer,
@@ -1616,6 +1616,12 @@ expires at: ${responseData.expires_at}`;
             url,
           ));
         } else {
+          const [generatedBodyHtml] = generateHtmlBasedOnType(
+            contentFromKeyAsArrayBuffer,
+            url,
+            metadata,
+            customTitle
+          );
           return cacheAndReturn(fetch_event, edgeCache, buildResponse(
             generatedBodyHtml,
             DEFAULT_MIME_HTML,
@@ -2483,6 +2489,97 @@ function looksLikeUrl(str) {
   }
 }
 
+// sniff stored bytes to a served MIME type. known magics resolve from the
+// first few bytes without decoding the body - that keeps the raw path (the
+// hot path for image/gallery views) from paying whole-body text decodes.
+// returns { type, text }: text is the decoded utf-8 string when the content
+// was typed as text (so callers don't decode a second time), else null.
+function detectContent(content) {
+  const contentAsUint8Array = new Uint8Array(content);
+
+  // encrypted container: 0x00 "GPE1" + salt + nonce + ciphertext
+  if (hex(contentAsUint8Array.slice(0, 5)) === "0047504531") {
+    return { type: "application/x-encrypted", text: null };
+  }
+
+  const header = hex(contentAsUint8Array.slice(0, 4));
+  if (header.slice(0, 6) === "ffd8ff") {
+    // all JPEGs start ff d8 ff; the fourth byte varies (e0-ee JFIF/EXIF/etc,
+    // db for quantization-table-first files) so match only the first three
+    return { type: "image/jpeg", text: null };
+  }
+  if (header.slice(0, 6) === "494433") {
+    // "ID3" - any ID3v2 tag version (v2.2/v2.3/v2.4); the fourth byte is the
+    // version and v2.3 (03) is far more common than v2.4 (04)
+    return { type: "audio/mp3", text: null };
+  }
+
+  // matches the first four bytes of the uploaded file
+  switch (header) {
+    // echo -n 'ftypmp42' | xxd
+    // 00000000: 6674 7970 6d70 3432                      ftypmp42
+    case "00000018":
+    case "0000001c":
+      if (hex(contentAsUint8Array.slice(4, 12)) === "667479706d703432") {
+        return { type: "video/mp4", text: null };
+      }
+      return { type: "application/octet-stream", text: null };
+    case "25504446":
+      return { type: "application/pdf", text: null };
+    case "89504e47":
+      return { type: "image/png", text: null };
+    case "47494638":
+      return { type: "image/gif", text: null };
+    case "504b0304":
+      return { type: "application/zip", text: null };
+    case "1a45dfa3":
+      // EBML container - WebM (video) or Matroska (.mkv); both are video/webm-ish to browsers
+      return { type: "video/webm", text: null };
+    case "4f676753":
+      // OggS - could be audio or video; audio/ogg covers the common case
+      return { type: "audio/ogg", text: null };
+    case "664c6143":
+      // fLaC
+      return { type: "audio/flac", text: null };
+    case "52494646":
+      // RIFF container - WebP if bytes 8-12 are "WEBP", otherwise WAV if "WAVE"
+      if (hex(contentAsUint8Array.slice(8, 12)) === "57454250") {
+        return { type: "image/webp", text: null };
+      }
+      if (hex(contentAsUint8Array.slice(8, 12)) === "57415645") {
+        return { type: "audio/wav", text: null };
+      }
+      return { type: "application/octet-stream", text: null };
+  }
+
+  // no magic matched: text candidate. strict utf-8 decode - invalid byte
+  // sequences mean binary; a lenient decode would turn binary into
+  // replacement chars and mistake it for text.
+  let contentAsString;
+  try {
+    contentAsString = new TextDecoder("utf-8", { fatal: true }).decode(contentAsUint8Array);
+  } catch (e) {
+    return { type: "application/octet-stream", text: null };
+  }
+  // valid utf-8 with no stray control bytes is text; code points above 127
+  // (accents, smart quotes, emoji) are normal text and must NOT count as binary
+  for (let i = 0; i < Math.min(contentAsString.length, 1000); i++) {
+    const code = contentAsString.charCodeAt(i);
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      return { type: "application/octet-stream", text: null };
+    }
+  }
+  // SVG is XML text; sniff a leading <svg or <?xml ... <svg before treating as markdown
+  if (looksLikeSvg(contentAsString)) {
+    return { type: "image/svg+xml", text: contentAsString };
+  }
+  if (looksLikeUrl(contentAsString)) {
+    // a bare single-line URL becomes a shortlink with a countdown viewer
+    return { type: "text/x-url", text: contentAsString };
+  }
+  return { type: DEFAULT_MIME_TEXT, text: contentAsString };
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -2496,124 +2593,21 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   if (content === null || content === undefined) {
     return ["CONTENT NOT FOUND", DEFAULT_MIME_TEXT];
   }
-  const contentAsUint8Array = new Uint8Array(content);
-
-  // encrypted container: 0x00 "GPE1" + salt + nonce + ciphertext
-  const isEncrypted = hex(contentAsUint8Array.slice(0, 5)) === "0047504531";
-
-  // strict utf-8 decode: invalid byte sequences mean binary. a lenient decode
-  // would turn binary into replacement chars and mistake it for text.
-  let contentAsString = "";
-  let contentIsPrintable = true;
-  try {
-    contentAsString = new TextDecoder("utf-8", { fatal: true }).decode(contentAsUint8Array);
-  } catch (e) {
-    contentAsString = new TextDecoder("utf-8").decode(contentAsUint8Array);
-    contentIsPrintable = false;
-  }
-  // valid utf-8 with no stray control bytes is text; code points above 127
-  // (accents, smart quotes, emoji) are normal text and must NOT count as binary
-  if (contentIsPrintable) {
-    for (let i = 0; i < Math.min(contentAsString.length, 1000); i++) {
-      const code = contentAsString.charCodeAt(i);
-      if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
-        contentIsPrintable = false;
-        break;
-      }
-    }
-  }
-  const header = hex(contentAsUint8Array.slice(0, 4));
-  let injectorScript, type;
-
-  // Handle encrypted content specially - don't auto-redirect
-  if (isEncrypted) {
-    type = "application/x-encrypted";
-    injectorScript = "";
-  } else if (header.slice(0, 6) === "ffd8ff") {
-    // all JPEGs start ff d8 ff; the fourth byte varies (e0-ee JFIF/EXIF/etc,
-    // db for quantization-table-first files) so match only the first three
-    type = "image/jpeg";
-  } else if (header.slice(0, 6) === "494433") {
-    // "ID3" - any ID3v2 tag version (v2.2/v2.3/v2.4); the fourth byte is the
-    // version and v2.3 (03) is far more common than v2.4 (04)
-    type = "audio/mp3";
-  } else {
-  // matches the first four bytes of the uploaded file
-  switch (header) {
-    // echo -n 'ftypmp42' | xxd
-    // 00000000: 6674 7970 6d70 3432                      ftypmp42
-    case "00000018":
-    case "0000001c":
-      if (hex(contentAsUint8Array.slice(4, 12)) === "667479706d703432") {
-        type = "video/mp4";
-      } else {
-        type = "application/octet-stream";
-      }
-      break;
-    case "25504446":
-      type = "application/pdf";
-      break;
-    case "89504e47":
-      type = "image/png";
-      break;
-    case "47494638":
-      type = "image/gif";
-      break;
-    case "504b0304":
-      type = "application/zip";
-      break;
-    case "1a45dfa3":
-      // EBML container - WebM (video) or Matroska (.mkv); both are video/webm-ish to browsers
-      type = "video/webm";
-      break;
-    case "4f676753":
-      // OggS - could be audio or video; audio/ogg covers the common case
-      type = "audio/ogg";
-      break;
-    case "664c6143":
-      // fLaC
-      type = "audio/flac";
-      break;
-    case "52494646":
-      // RIFF container - WebP if bytes 8-12 are "WEBP", otherwise WAV if "WAVE"
-      if (hex(contentAsUint8Array.slice(8, 12)) === "57454250") {
-        type = "image/webp";
-      } else if (hex(contentAsUint8Array.slice(8, 12)) === "57415645") {
-        type = "audio/wav";
-      } else {
-        type = "application/octet-stream";
-      }
-      break;
-    default:
-      if (contentIsPrintable === true) {
-        // SVG is XML text; sniff a leading <svg or <?xml ... <svg before treating as markdown
-        if (looksLikeSvg(contentAsString)) {
-          type = "image/svg+xml";
-        } else if (looksLikeUrl(contentAsString)) {
-          // a bare single-line URL becomes a shortlink with a countdown viewer
-          type = "text/x-url";
-        } else {
-          type = DEFAULT_MIME_TEXT;
-        }
-      } else {
-        type = "application/octet-stream";
-      }
-      break;
-  }
-  } // end encrypted check
+  const { type, text: decodedText } = detectContent(content);
+  let injectorScript;
 
   switch (type) {
     case "application/x-encrypted":
       // Encrypted content - let the HTML wrapper handle decryption
       injectorScript = "";
       break;
+    // everything below redirects to raw: browsers render all of these natively.
+    // crawlers don't run the JS redirect, so og/meta previews still work.
     case "image/png":
     case "image/gif":
     case "image/jpeg":
     case "image/webp":
     case "image/svg+xml":
-      // browsers render these natively - send them to raw like pdf/video;
-      // crawlers don't run the JS redirect so og:image previews still work
     case "audio/mp3":
     case "audio/ogg":
     case "audio/flac":
@@ -2650,7 +2644,7 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   const encodedPayload = "";
   // strip non-url characters from description
   if (type === DEFAULT_MIME_TEXT) {
-    const text = new TextDecoder("utf-8").decode(content);
+    const text = decodedText; // already decoded during type detection
     // markdown by default; an explicit ?content_type of code/* or text other than
     // markdown, or a ?lang= hint, renders verbatim in a fenced code block instead
     const ct = (url && url.searchParams.get("content_type") || "").toLowerCase();
