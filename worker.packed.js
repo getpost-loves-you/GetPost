@@ -3440,6 +3440,17 @@ body {
         return ext === '' && (mt === '' || mt.indexOf('text/plain') !== -1);
     }
 
+    // decide whether printable content is an html document to run live (in a
+    // sandboxed iframe). driven by the mime type or an .html/.htm extension;
+    // a .txt extension always wins as plain text, matching renderAsMarkdown.
+    function isHtmlDocument(mimeType, filename) {
+        var ext = fileExt(filename);
+        if (ext === 'txt') return false;
+        if (ext === 'html' || ext === 'htm') return true;
+        var mt = (mimeType || '').toLowerCase();
+        return mt.indexOf('text/html') !== -1 || mt.indexOf('application/xhtml') !== -1;
+    }
+
     // wrap verbatim text in a fenced code block, escaping any backtick runs that
     // would otherwise close the fence, and tagging a language from the extension.
     // NB: this file is embedded inside a backtick template literal in worker.js, so
@@ -3781,7 +3792,19 @@ body {
             }
         }
 
-        if (isPrintable) {
+        if (isPrintable && isHtmlDocument(originalMimeType, originalFilename)) {
+            // a decrypted html document runs as a live page (SPAs, etc), but
+            // inside a sandboxed iframe: allow-scripts WITHOUT allow-same-origin
+            // walls it off from the getpost origin - no cookies, no localStorage,
+            // no same-origin fetches. the recipient already holds the passphrase,
+            // so this only ever runs content they chose to decrypt.
+            var frame = document.createElement('iframe');
+            frame.setAttribute('sandbox', 'allow-scripts allow-popups allow-forms');
+            frame.style.cssText = 'width:100%;height:80vh;border:1px solid #222;border-radius:4px;background:#fff';
+            frame.srcdoc = dataString;
+            decryptedDiv.innerHTML = '';
+            decryptedDiv.appendChild(frame);
+        } else if (isPrintable) {
             try {
                 if (typeof marked === 'undefined') throw new Error('no marked');
                 if (renderAsMarkdown(originalMimeType, originalFilename)) {

@@ -173,6 +173,22 @@ async function test(name, fn) {
     new vm.Script(inline);
   });
 
+  await test("decrypted html renders in a sandboxed iframe, never same-origin", () => {
+    // the encrypted viewer runs decrypted html documents live (SPAs), but only
+    // inside sandbox='allow-scripts' WITHOUT allow-same-origin. guard both the
+    // presence of the iframe path and the absence of the origin-escape grant.
+    const [html] = sandbox.generateHtmlBasedOnType(
+      new TextEncoder().encode("x").buffer,
+      new URL("https://t.local/post?key=X"), { permanent: true }, null);
+    assert.ok(html.includes("isHtmlDocument"), "html document branch present");
+    const sandboxAttr = html.match(/setAttribute\('sandbox', '([^']*)'\)/);
+    assert.ok(sandboxAttr, "iframe sets a sandbox attribute");
+    assert.ok(sandboxAttr[1].indexOf("allow-scripts") !== -1, "sandbox allows scripts");
+    // the actual grant list (not our surrounding comments) must never let the
+    // frame reach the getpost origin
+    assert.ok(sandboxAttr[1].indexOf("allow-same-origin") === -1, "sandbox must not grant same-origin");
+  });
+
   console.log("[type detection]");
 
   const detect = (bytes) =>
