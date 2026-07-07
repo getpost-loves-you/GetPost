@@ -809,6 +809,13 @@ async function test(name, fn) {
       assert.ok(html.includes('id="fileInput" multiple'), path + " accepts multiple files");
       assert.ok(html.includes('id="resultList"'), path + " has multi-result list");
       assert.ok(html.includes('id="indexToggle"'), path + " has index-page option");
+      // hidden operator named-paste mode: fields present, key held in
+      // sessionStorage only (never localStorage/disk)
+      assert.ok(html.includes('id="namedKeyInput"'), path + " has named-key unlock field");
+      assert.ok(html.includes('id="namedName"'), path + " has /x/ name field");
+      assert.ok(html.includes("'iamroot'"), path + " has the keystroke trigger");
+      assert.ok(html.includes("sessionStorage"), path + " uses sessionStorage for the key");
+      assert.ok(!html.includes("localStorage"), path + " never puts the key in localStorage");
     }
   });
 

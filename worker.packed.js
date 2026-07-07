@@ -743,6 +743,100 @@ body {
 }
 
 input[type="file"] { display: none; }
+
+/* operator unlock panel + named-paste field (hidden until the easter egg) */
+.root-unlock {
+    display: none;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    border: 1px solid #333;
+    border-radius: 2px;
+}
+
+.root-unlock.active { display: block; }
+
+.root-label {
+    color: #d69e2e;
+    font-size: 12px;
+    margin-bottom: 0.5rem;
+}
+
+.root-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.root-row input {
+    flex: 1;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 2px;
+    color: #d69e2e;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0.5rem 0.6rem;
+    outline: none;
+}
+
+.root-row input:focus { border-color: #d69e2e; }
+
+.root-btn {
+    background: none;
+    border: 1px solid #d69e2e;
+    border-radius: 2px;
+    color: #d69e2e;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.root-btn:hover { background: rgba(214, 158, 46, 0.1); }
+
+.root-status {
+    font-size: 12px;
+    margin-top: 0.5rem;
+    min-height: 1em;
+}
+
+.root-status.ok { color: #48bb78; }
+.root-status.err { color: #e53e3e; }
+
+.named-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    font-size: 12px;
+    color: #d69e2e;
+}
+
+.named-row input[type="text"] {
+    flex: 1;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 2px;
+    color: #d69e2e;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0.4rem 0.5rem;
+    outline: none;
+}
+
+.named-row input[type="text"]:focus { border-color: #d69e2e; }
+
+.named-label { white-space: nowrap; }
+
+.named-overwrite {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: #888;
+    cursor: pointer;
+    white-space: nowrap;
+}
 </style>
 </head>
 <body>
@@ -752,7 +846,7 @@ input[type="file"] { display: none; }
     <a href="/about">[?]</a>
 </div>
 
-<div class="prompt">$ upload <span class="cursor"></span></div>
+<div class="prompt" id="promptLine">$ upload <span class="cursor"></span></div>
 
 <div class="drop-zone" id="dropZone" onclick="dropZoneClick()">
     <p id="dropHint">drop files here, click to select, or <a href="#" id="pasteToggle">paste text</a></p>
@@ -761,7 +855,25 @@ input[type="file"] { display: none; }
     <div class="line status-line" id="statusLine"></div>
 </div>
 
+<!-- hidden operator unlock: revealed by typing 'iamroot' (unfocused) or 5 rapid
+     taps on the prompt line. the NAMED_KEY lives in sessionStorage only (gone on
+     tab close), never on disk. an instance with no NAMED_KEY just returns 401. -->
+<div class="root-unlock" id="rootUnlock">
+    <div class="root-label">operator: enter NAMED_KEY to publish named pastes at /x/</div>
+    <div class="root-row">
+        <input type="password" id="namedKeyInput" placeholder="NAMED_KEY" autocomplete="off" spellcheck="false">
+        <button class="root-btn" id="namedKeyBtn" onclick="unlockNamed()">unlock</button>
+        <button class="root-btn" id="namedKeyLock" onclick="lockNamed()" style="display:none">lock</button>
+    </div>
+    <div class="root-status" id="rootStatus"></div>
+</div>
+
 <div class="password-section" id="passwordSection">
+    <div class="named-row" id="namedRow" style="display: none;">
+        <label class="named-label" for="namedName">publish at /x/</label>
+        <input type="text" id="namedName" placeholder="my-page" spellcheck="false" autocomplete="off">
+        <label class="named-overwrite"><input type="checkbox" id="namedOverwrite"> overwrite</label>
+    </div>
     <label class="encrypt-row"><input type="checkbox" id="encryptToggle" checked> encrypt (e2e)</label>
     <label class="encrypt-row" id="indexRow" style="display: none;"><input type="checkbox" id="indexToggle"> create index page (one link listing all files)</label>
     <div class="password-label" id="passphraseLabel">passphrase (auto-generated, click to edit):</div>
@@ -839,6 +951,11 @@ function setEncryptMode(on) {
 function updateUploadLabel() {
     var on = document.getElementById('encryptToggle').checked;
     var n = textMode ? 1 : selectedFiles.length;
+    // named (operator) mode publishes a single blob to /x/<name>
+    if (typeof namedKey !== 'undefined' && namedKey !== null) {
+        document.getElementById('uploadBtn').textContent = on ? 'publish to /x/' : 'publish unencrypted to /x/';
+        return;
+    }
     var word = on ? 'upload' : 'upload unencrypted';
     document.getElementById('uploadBtn').textContent = n > 1 ? word + ' ' + n + ' files' : word;
 }
@@ -1104,13 +1221,20 @@ async function deriveKey(password, salt) {
     return new Uint8Array(result.hash);
 }
 
-// POST one payload to /post, reporting progress via the status line
-function uploadBlob(payload, progressLabel) {
+// POST one payload, reporting progress via the status line. opts.path overrides
+// the default /post target and opts.headers adds request headers (named pastes
+// POST to /x/<name> with an Authorization header). the status message on a
+// non-2xx surfaces the server's plain-text reason (e.g. 401/409 for named).
+function uploadBlob(payload, progressLabel, opts) {
+    opts = opts || {};
     return new Promise(function(resolve, reject) {
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', '/post', true);
+        xhr.open('POST', opts.path || '/post', true);
         xhr.setRequestHeader('Accept', 'application/json');
         xhr.setRequestHeader('X-TTL', document.getElementById('ttlSelect').value);
+        if (opts.headers) {
+            for (var h in opts.headers) xhr.setRequestHeader(h, opts.headers[h]);
+        }
         xhr.responseType = 'json';
 
         xhr.upload.addEventListener('progress', function(e) {
@@ -1121,10 +1245,16 @@ function uploadBlob(payload, progressLabel) {
         });
 
         xhr.onload = function() {
-            if (xhr.response && xhr.response.share_url) {
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response && xhr.response.share_url) {
                 resolve(xhr.response);
+            } else if (xhr.status === 401) {
+                reject(new Error('named-paste key rejected (401) - re-check NAMED_KEY'));
+            } else if (xhr.status === 403) {
+                reject(new Error('named pastes not enabled on this instance (403)'));
+            } else if (xhr.status === 409) {
+                reject(new Error('/x/ name already exists - tick overwrite to replace it'));
             } else {
-                reject(new Error('unexpected response'));
+                reject(new Error('upload failed (' + xhr.status + ')'));
             }
         };
 
@@ -1174,6 +1304,26 @@ async function doUpload() {
         return;
     }
 
+    // named-paste mode: one blob published at /x/<name>, gated on the operator
+    // key. the server stores one blob per name, so batches and the index page
+    // don't apply here - require exactly one upload.
+    var named = namedKey !== null;
+    var namedName = named ? document.getElementById('namedName').value.trim() : '';
+    if (named) {
+        if (!namedName) {
+            setStatus('error: enter a name for /x/', 'err');
+            return;
+        }
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(namedName)) {
+            setStatus('error: name must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}', 'err');
+            return;
+        }
+        if (uploads.length > 1) {
+            setStatus('error: named pastes take one file at a time', 'err');
+            return;
+        }
+    }
+
     var uploadBtn = document.getElementById('uploadBtn');
     uploadBtn.disabled = true;
     uploadBtn.style.opacity = '0.4';
@@ -1215,7 +1365,14 @@ async function doUpload() {
 
             var progressLabel = uploads.length > 1 ?
                 (i + 1) + '/' + uploads.length + ' ' + u.name + '... ' : '... ';
-            var resp = await uploadBlob(payload, progressLabel);
+            var blobOpts = null;
+            if (named) {
+                blobOpts = { path: '/x/' + encodeURIComponent(namedName), headers: { 'Authorization': namedKey } };
+                if (document.getElementById('namedOverwrite').checked) {
+                    blobOpts.headers['X-I-Really-Mean-It'] = 'yes';
+                }
+            }
+            var resp = await uploadBlob(payload, progressLabel, blobOpts);
 
             // only encrypted uploads carry the passphrase fragment
             var shareUrl = resp.share_url;
@@ -1321,6 +1478,90 @@ document.getElementById('pasteToggle').addEventListener('click', function(e) {
 document.getElementById('encryptToggle').addEventListener('change', function() {
     setEncryptMode(this.checked);
 });
+
+// --- hidden operator mode: named pastes at /x/<name> ---
+// the NAMED_KEY is held in memory (namedKey) and mirrored to sessionStorage so
+// it survives a reload within the tab but never touches disk and is gone on
+// close. null means locked (normal /post uploads).
+var namedKey = null;
+try { namedKey = sessionStorage.getItem('getpost_named_key'); } catch (e) { namedKey = null; }
+
+function showRootUnlock() {
+    document.getElementById('rootUnlock').classList.add('active');
+    if (namedKey === null) document.getElementById('namedKeyInput').focus();
+}
+
+// reflect lock state into the ui: named field + lock button when unlocked
+function applyNamedState() {
+    var unlocked = namedKey !== null;
+    document.getElementById('namedRow').style.display = unlocked ? 'flex' : 'none';
+    document.getElementById('namedKeyBtn').style.display = unlocked ? 'none' : '';
+    document.getElementById('namedKeyLock').style.display = unlocked ? '' : 'none';
+    document.getElementById('namedKeyInput').style.display = unlocked ? 'none' : '';
+    // named pastes are single-blob and operator-only; the index option (a batch
+    // feature) has no meaning here, so keep it hidden while unlocked
+    if (unlocked) document.getElementById('indexRow').style.display = 'none';
+    updateUploadLabel();
+}
+
+function unlockNamed() {
+    var v = document.getElementById('namedKeyInput').value;
+    if (!v) { setRootStatus('enter the NAMED_KEY', 'err'); return; }
+    namedKey = v;
+    try { sessionStorage.setItem('getpost_named_key', v); } catch (e) {}
+    document.getElementById('namedKeyInput').value = '';
+    setRootStatus('unlocked - uploads now publish to /x/ (session only)', 'ok');
+    applyNamedState();
+}
+
+function lockNamed() {
+    namedKey = null;
+    try { sessionStorage.removeItem('getpost_named_key'); } catch (e) {}
+    setRootStatus('locked - back to normal uploads', '');
+    applyNamedState();
+}
+
+function setRootStatus(msg, cls) {
+    var el = document.getElementById('rootStatus');
+    el.textContent = msg;
+    el.className = 'root-status' + (cls ? ' ' + cls : '');
+}
+
+// desktop easter egg: a ring buffer of the last N chars typed while nothing is
+// focused; revealing the panel when the tail spells the trigger word
+var TRIGGER = 'iamroot';
+var keyRing = '';
+document.addEventListener('keydown', function(e) {
+    var t = e.target;
+    // ignore keystrokes aimed at a field - only "typed at the page" counts
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key.length !== 1) return;
+    keyRing = (keyRing + e.key.toLowerCase()).slice(-TRIGGER.length);
+    if (keyRing === TRIGGER) {
+        keyRing = '';
+        showRootUnlock();
+    }
+});
+
+// mobile easter egg: 5 rapid taps on the prompt line
+var tapCount = 0;
+var tapTimer = null;
+document.getElementById('promptLine').addEventListener('click', function() {
+    tapCount++;
+    if (tapTimer) clearTimeout(tapTimer);
+    tapTimer = setTimeout(function() { tapCount = 0; }, 1500);
+    if (tapCount >= 5) {
+        tapCount = 0;
+        showRootUnlock();
+    }
+});
+
+// if a key was restored from sessionStorage, reflect it (and reveal the panel
+// so the operator can see/lock it); otherwise start locked and hidden
+if (namedKey !== null) {
+    document.getElementById('rootUnlock').classList.add('active');
+}
+applyNamedState();
 </script>
 </body>
 </html>
