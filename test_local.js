@@ -214,6 +214,20 @@ async function test(name, fn) {
     assert.ok(html.includes("window.location.assign(window.location.href"));
   });
 
+  await test("isom mp4 with a 0x20 ftyp box (ffmpeg output) is video/mp4", () => {
+    // real header from an ffmpeg/x264 encode: 4 compatible brands -> box size 0x20
+    const bytes = Array.from(new TextEncoder().encode("\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41"));
+    bytes[0] = 0; bytes[1] = 0; bytes[2] = 0; bytes[3] = 0x20;
+    const [, type] = detect(bytes);
+    assert.strictEqual(type, "video/mp4");
+  });
+
+  await test("ftyp brands: qt -> quicktime, M4A -> audio/mp4", () => {
+    const mk = (brand) => { const b = Array.from(new TextEncoder().encode("\x00\x00\x00\x14ftyp" + brand + "\x00\x00\x00\x00")); b[0]=b[1]=b[2]=0; b[3]=0x14; return b; };
+    assert.strictEqual(detect(mk("qt  "))[1], "video/quicktime");
+    assert.strictEqual(detect(mk("M4A "))[1], "audio/mp4");
+  });
+
   await test("png magic detected", () => {
     const [, type] = detect([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     assert.strictEqual(type, "image/png");

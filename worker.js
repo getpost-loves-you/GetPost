@@ -885,16 +885,20 @@ function detectContent(content) {
     return { type: "audio/mp3", text: null };
   }
 
+  // ISO base media file (mp4/m4a/mov/heic): bytes 0-4 are the ftyp box size,
+  // which varies with the number of compatible brands (0x18, 0x1c, 0x20, ...),
+  // so key on the "ftyp" tag at 4-8 and pick the type from the major brand at
+  // 8-12. ffmpeg/x264 output is "isom"; "mp42" is the QuickTime/Apple flavour.
+  if (hex(contentAsUint8Array.slice(4, 8)) === "66747970") {
+    const brand = String.fromCharCode(...contentAsUint8Array.slice(8, 12));
+    if (brand === "qt  ") return { type: "video/quicktime", text: null };
+    if (brand === "M4A ") return { type: "audio/mp4", text: null };
+    if (/^(heic|heix|hevc|mif1|msf1)$/.test(brand)) return { type: "image/heic", text: null };
+    return { type: "video/mp4", text: null };
+  }
+
   // matches the first four bytes of the uploaded file
   switch (header) {
-    // echo -n 'ftypmp42' | xxd
-    // 00000000: 6674 7970 6d70 3432                      ftypmp42
-    case "00000018":
-    case "0000001c":
-      if (hex(contentAsUint8Array.slice(4, 12)) === "667479706d703432") {
-        return { type: "video/mp4", text: null };
-      }
-      return { type: "application/octet-stream", text: null };
     case "25504446":
       return { type: "application/pdf", text: null };
     case "89504e47":
@@ -984,7 +988,10 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "audio/flac":
     case "audio/wav":
     case "video/mp4":
+    case "video/quicktime":
     case "video/webm":
+    case "audio/mp4":
+    case "image/heic":
     case "application/pdf":
     case "application/zip":
     case "application/octet-stream":

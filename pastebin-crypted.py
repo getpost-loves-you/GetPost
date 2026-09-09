@@ -180,12 +180,17 @@ def detect_mime_type(content: bytes) -> str:
         return 'application/x-encrypted'
 
     # Match file signatures (following worker.js logic)
-    # MP4 video - special case, needs to check bytes 4-12
-    if header in ['00000018', '0000001c']:
-        if len(content) >= 12:
-            ftyp_check = content[4:12].hex()
-            if ftyp_check == '667479706d703432':  # "ftypmp42"
-                return 'video/mp4'
+    # ISO base media file (mp4/m4a/mov/heic): the ftyp box size in bytes 0-4
+    # varies, so key on the "ftyp" tag at 4-8 and the major brand at 8-12
+    if content[4:8] == b'ftyp':
+        brand = content[8:12]
+        if brand == b'qt  ':
+            return 'video/quicktime'
+        if brand == b'M4A ':
+            return 'audio/mp4'
+        if brand in (b'heic', b'heix', b'hevc', b'mif1', b'msf1'):
+            return 'image/heic'
+        return 'video/mp4'
 
     # PDF
     if header == '25504446':  # %PDF
