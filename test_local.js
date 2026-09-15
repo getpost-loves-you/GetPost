@@ -214,6 +214,48 @@ async function test(name, fn) {
     assert.ok(html.includes("window.location.assign(window.location.href"));
   });
 
+  await test("?loop plays video inline on a looping <video> instead of redirecting", () => {
+    const mp4 = Uint8Array.from([0, 0, 0, 0x20, ...new TextEncoder().encode("ftypisom"), 0, 0, 2, 0]).buffer;
+    const render = (u) => sandbox.generateHtmlBasedOnType(mp4, new URL(u), null, null);
+    for (const u of ["https://t.local/post?key=X&loop=true", "https://t.local/post?key=X&loop", "https://t.local/x/vid?loop=1"]) {
+      const [html, type] = render(u);
+      assert.strictEqual(type, "video/mp4");
+      assert.ok(/<video [^>]*\bloop\b/.test(html), `looping <video> for ${u}`);
+      assert.ok(/<video [^>]*\bmuted\b/.test(html), "muted so autoplay is allowed");
+      assert.ok(!html.includes("window.location.assign(window.location.href"), `no raw redirect for ${u}`);
+    }
+    // src is the page's own raw url, attribute-escaped
+    const [q] = render("https://t.local/post?key=X&loop=true");
+    assert.ok(q.includes('src="https:&#x2F;&#x2F;t.local&#x2F;post?key=X&amp;loop=true&amp;raw"'), "query page src");
+    const [bare] = render("https://t.local/x/vid?loop");
+    assert.ok(bare.includes('src="https:&#x2F;&#x2F;t.local&#x2F;x&#x2F;vid?loop&amp;raw"'), "bare /x/ page src");
+    // explicit off values keep the redirect
+    for (const v of ["0", "false", "no"]) {
+      const [html] = render(`https://t.local/post?key=X&loop=${v}`);
+      assert.ok(!html.includes("<video autoplay loop"), `loop=${v} is off`);
+      assert.ok(html.includes("window.location.assign(window.location.href"), `loop=${v} still redirects`);
+    }
+    // webm too
+    const [webm] = sandbox.generateHtmlBasedOnType(
+      Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]).buffer,
+      new URL("https://t.local/post?key=X&loop"), null, null);
+    assert.ok(/<video [^>]*\bloop\b/.test(webm), "webm loops");
+  });
+
+  await test("?loop is ignored on non-video content", () => {
+    const at = (bytes, u) => sandbox.generateHtmlBasedOnType(Uint8Array.from(bytes).buffer, new URL(u), null, null);
+    // png keeps the raw redirect
+    const [png, pngType] = at([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "https://t.local/post?key=X&loop=true");
+    assert.strictEqual(pngType, "image/png");
+    assert.ok(!png.includes("<video autoplay loop"), "no looping video for png");
+    assert.ok(png.includes("window.location.assign(window.location.href"), "png still redirects");
+    // markdown renders as usual
+    const [md, mdType] = at(Array.from(new TextEncoder().encode("# hi")), "https://t.local/post?key=X&loop=true");
+    assert.strictEqual(mdType, "text/raw; charset=UTF-8");
+    assert.ok(md.includes("<h1"), "markdown still rendered");
+    assert.ok(!md.includes("<video autoplay loop"), "no looping video for text");
+  });
+
   await test("isom mp4 with a 0x20 ftyp box (ffmpeg output) is video/mp4", () => {
     // real header from an ffmpeg/x264 encode: 4 compatible brands -> box size 0x20
     const bytes = Array.from(new TextEncoder().encode("\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41"));

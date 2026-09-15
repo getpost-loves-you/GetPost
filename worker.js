@@ -970,12 +970,31 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   }
   const { type, text: decodedText } = detectContent(content);
   let injectorScript;
+  // ?loop (or loop=true): play video inline on a looping <video> instead of
+  // redirecting to the raw bytes. presence-only like ?raw, except an explicit
+  // loop=0/false/no is off. ignored for everything that isn't video.
+  const loopParam = url && url.searchParams ? url.searchParams.get("loop") : null;
+  const loopVideo = loopParam !== null && !/^(0|false|no|off)$/i.test(loopParam);
+  let loopVideoHtml = "";
 
   switch (type) {
     case "application/x-encrypted":
       // Encrypted content - let the HTML wrapper handle decryption
       injectorScript = "";
       break;
+    case "video/mp4":
+    case "video/quicktime":
+    case "video/webm":
+      if (loopVideo) {
+        // gif-style loop: autoplay only works muted, so mute and keep the
+        // controls so the viewer can unmute. src is this page's own raw url.
+        const rawSrc = sanitizeHtml(url.toString() + (url.search ? "&raw" : "?raw"));
+        loopVideoHtml = `<video autoplay loop muted playsinline controls src="${rawSrc}" ` +
+          `style="display:block;max-width:100%;max-height:90vh;margin:0 auto"></video>`;
+        injectorScript = "";
+        break;
+      }
+      // no loop flag: fall through to the raw redirect with the rest
     // everything below redirects to raw: browsers render all of these natively.
     // crawlers don't run the JS redirect, so og/meta previews still work.
     case "image/png":
@@ -987,9 +1006,6 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "audio/ogg":
     case "audio/flac":
     case "audio/wav":
-    case "video/mp4":
-    case "video/quicktime":
-    case "video/webm":
     case "audio/mp4":
     case "image/heic":
     case "application/pdf":
@@ -1046,6 +1062,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   } else if (type === "text/x-url") {
     // don't render the URL as page content - the viewer JS owns the display
     description = "GetPost: redirect";
+  } else if (loopVideoHtml) {
+    contentAsHtmlFromMarked = loopVideoHtml;
+    description = "GetPost: looping " + type;
   } else {
     description = "GetPost: " + type;
   }

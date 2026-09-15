@@ -2536,6 +2536,7 @@ X-TTL: 3600          # seconds until expiry
 
 # URL parameters
 ?raw                 # return original file
+?loop=true           # video: play inline on a loop (ignored for non-video)
 ?cors=1              # enable CORS headers
 
 # delete a post (deletion requires POST; GET shows a confirmation page)
@@ -2612,8 +2613,9 @@ programmatic consumers (scripts, agents, other services).
 ### Content typing
 
 On read, the worker sniffs the stored bytes by magic number and serves an appropriate
-MIME type. Recognized: mp4, PDF, PNG, GIF, MP3, ZIP, WebM/Matroska, Ogg, FLAC, WAV, WebP,
-JPEG, SVG. Encrypted containers (see below) are typed \`application/x-encrypted\`. Anything
+MIME type. Recognized: ISO base media (any \`ftyp\` brand: mp4/m4v → \`video/mp4\`, \`qt\` →
+\`video/quicktime\`, \`M4A\` → \`audio/mp4\`, HEIF brands → \`image/heic\`), PDF, PNG, GIF, MP3,
+ZIP, WebM/Matroska, Ogg, FLAC, WAV, WebP, JPEG, SVG. Encrypted containers (see below) are typed \`application/x-encrypted\`. Anything
 that decodes as printable UTF-8 and isn't an SVG/URL is treated as \`text/raw\` (rendered as
 markdown in the browser viewer). A bare single-line \`http(s)://\` URL is typed \`text/x-url\`
 and becomes a client-side "shortlink" with a cancellable redirect countdown. Unrecognized
@@ -2746,8 +2748,9 @@ echo "hello" | curl -H "X-TTL: 3600" --data-binary @- "$BASE/post"
 
 - Without \`key\`: returns the **upload HTML page** (\`200\`).
 - With \`key\`, no \`raw\`: returns the **HTML viewer** wrapping the content (markdown render
-  for text, \`<img>\` for images, decrypt UI for GPE1, redirect countdown for \`text/x-url\`,
-  auto-redirect to \`&raw\` for other binary).
+  for text, decrypt UI for GPE1, redirect countdown for \`text/x-url\`, looping \`<video>\` for
+  video with \`?loop\`, and a JS auto-redirect to \`&raw\` for images, audio, video and other
+  binary — crawlers don't run it, so \`og:image\`/meta previews still work).
 - With \`key\` and \`raw\`: returns the **original bytes** with the sniffed MIME type.
 
 \`HEAD\` is served via the same path (body stripped by the runtime) — useful for link-preview
@@ -2755,6 +2758,9 @@ crawlers.
 
 **Query params**
 - \`raw\` (presence) — return original bytes instead of the HTML viewer.
+- \`loop\` (presence, e.g. \`loop=true\`) — for video content, play it inline on a looping,
+  muted \`<video>\` with controls instead of redirecting to \`&raw\`. Ignored on non-video
+  content. \`loop=0\`/\`false\`/\`no\` turns it off.
 - \`content_type=<mime>\` — override the response \`Content-Type\` for \`raw\` reads. Validated;
   invalid value → \`400\`.
 - \`title=<text>\` — custom \`<title>\`/\`og:title\` for the viewer page (HTML-sanitized, max
@@ -2772,6 +2778,7 @@ crawlers.
 \`\`\`sh
 curl -s "$BASE/post?key=01ARZ...&raw"                  # original bytes
 curl -s "$BASE/post?key=01ARZ...&raw&content_type=text/html"
+open "$BASE/post?key=01ARZ...&loop=true"               # video, looping inline
 curl -sI "$BASE/post?key=01ARZ..."                     # HEAD
 \`\`\`
 
@@ -2809,7 +2816,7 @@ binding (otherwise writes return \`403\`).
   ≥60 s like \`/post\`).
 
 #### \`GET /x/<name>\` (and \`HEAD\`)
-Public read. Same \`raw\`, \`content_type\`, \`title\`, \`cors\` params as \`GET /post\`.
+Public read. Same \`raw\`, \`loop\`, \`content_type\`, \`title\`, \`lang\`, \`cors\` params as \`GET /post\`.
 - \`200\` — HTML viewer, or raw bytes with \`?raw\`.
 - \`404\` — name not found or invalid.
 
@@ -2846,6 +2853,7 @@ curl -X DELETE -H "Authorization: $NAMED_KEY" "$BASE/x/welcome"
 | Path | Returns | Content-Type | Cache |
 |---|---|---|---|
 | \`GET /about\` | about/docs HTML page | \`text/html\` | — |
+| \`GET /api\`, \`/api.md\`, \`/llms.txt\` | this document, verbatim markdown | \`text/markdown\` | 24 h |
 | \`GET /pastebin-crypted.py\` | the E2E-encrypted CLI client (self-hosted, byte-identical per instance) | \`text/plain\` | 24 h |
 | \`GET /naclfast.min.js\` | NaCl crypto library | \`application/javascript\` | 24 h |
 | \`GET /argon2bundled.min.js\` | Argon2 KDF library | \`application/javascript\` | 24 h |
@@ -3319,12 +3327,31 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   }
   const { type, text: decodedText } = detectContent(content);
   let injectorScript;
+  // ?loop (or loop=true): play video inline on a looping <video> instead of
+  // redirecting to the raw bytes. presence-only like ?raw, except an explicit
+  // loop=0/false/no is off. ignored for everything that isn't video.
+  const loopParam = url && url.searchParams ? url.searchParams.get("loop") : null;
+  const loopVideo = loopParam !== null && !/^(0|false|no|off)$/i.test(loopParam);
+  let loopVideoHtml = "";
 
   switch (type) {
     case "application/x-encrypted":
       // Encrypted content - let the HTML wrapper handle decryption
       injectorScript = "";
       break;
+    case "video/mp4":
+    case "video/quicktime":
+    case "video/webm":
+      if (loopVideo) {
+        // gif-style loop: autoplay only works muted, so mute and keep the
+        // controls so the viewer can unmute. src is this page's own raw url.
+        const rawSrc = sanitizeHtml(url.toString() + (url.search ? "&raw" : "?raw"));
+        loopVideoHtml = `<video autoplay loop muted playsinline controls src="${rawSrc}" ` +
+          `style="display:block;max-width:100%;max-height:90vh;margin:0 auto"></video>`;
+        injectorScript = "";
+        break;
+      }
+      // no loop flag: fall through to the raw redirect with the rest
     // everything below redirects to raw: browsers render all of these natively.
     // crawlers don't run the JS redirect, so og/meta previews still work.
     case "image/png":
@@ -3336,9 +3363,6 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "audio/ogg":
     case "audio/flac":
     case "audio/wav":
-    case "video/mp4":
-    case "video/quicktime":
-    case "video/webm":
     case "audio/mp4":
     case "image/heic":
     case "application/pdf":
@@ -3395,6 +3419,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   } else if (type === "text/x-url") {
     // don't render the URL as page content - the viewer JS owns the display
     description = "GetPost: redirect";
+  } else if (loopVideoHtml) {
+    contentAsHtmlFromMarked = loopVideoHtml;
+    description = "GetPost: looping " + type;
   } else {
     description = "GetPost: " + type;
   }
