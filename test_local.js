@@ -940,13 +940,31 @@ async function test(name, fn) {
     assert.strictEqual(served, fs.readFileSync(__dirname + "/pastebin-crypted.py", "utf8"));
   });
 
-  await test("api doc served byte-identical as markdown at /api, /api.md, /llms.txt", async () => {
+  await test("api doc served byte-identical as markdown at /api, /api.md", async () => {
     const repoCopy = fs.readFileSync(__dirname + "/getpost-api.md", "utf8");
-    for (const path of ["/api", "/api.md", "/llms.txt"]) {
+    for (const path of ["/api", "/api.md"]) {
       const resp = await call("GET", path);
       assert.strictEqual(resp.status, 200, path);
       assert.ok((resp.headers.get("content-type") || "").includes("text/markdown"), path + " is markdown");
       assert.strictEqual(await resp.text(), repoCopy, path + " byte-identical");
+    }
+  });
+
+  await test("/llms.txt is AGENTS.md followed by the api doc; /agents.md redirects there", async () => {
+    const agents = fs.readFileSync(__dirname + "/AGENTS.md", "utf8");
+    const api = fs.readFileSync(__dirname + "/getpost-api.md", "utf8");
+    const resp = await call("GET", "/llms.txt");
+    assert.strictEqual(resp.status, 200);
+    assert.ok((resp.headers.get("content-type") || "").includes("text/markdown"), "markdown");
+    assert.strictEqual(await resp.text(), agents + "\n\n---\n\n" + api, "AGENTS.md + rule + api doc");
+    // agents.md sections the convention suggests are all present
+    for (const h of ["## Project overview", "## Testing instructions", "## Code style", "## Security considerations", "## Deployment", "## Commit and PR instructions"]) {
+      assert.ok(agents.includes(h), h);
+    }
+    for (const path of ["/agents.md", "/AGENTS.md"]) {
+      const r = await call("GET", path);
+      assert.strictEqual(r.status, 301, path);
+      assert.strictEqual(r.headers.get("location"), "/llms.txt", path + " location");
     }
   });
 

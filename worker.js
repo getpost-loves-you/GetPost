@@ -568,9 +568,19 @@ expires at: ${responseData.expires_at}`;
       return buildResponse(about_page, DEFAULT_MIME_HTML, {}, 200, url);
     } else if (url.pathname === "/api" || url.pathname === "/api.md" || url.pathname === "/llms.txt") {
       // machine-readable API reference for programmatic/agent consumers, served
-      // verbatim as markdown (llms.txt convention points here too)
+      // verbatim as markdown. /llms.txt prepends the repo's AGENTS.md (agents.md
+      // convention: overview, build, test, style, security) so one fetch serves
+      // an agent whether it's calling the service or hacking on the code.
       const api_doc = `AUTOINSERT_GETPOST_API__MD`; // eslint-disable-line
-      return buildResponse(api_doc, "text/markdown; charset=UTF-8", CACHE_STATIC, 200, url);
+      let doc = api_doc;
+      if (url.pathname === "/llms.txt") {
+        const agents_doc = `AUTOINSERT_AGENTS__MD`; // eslint-disable-line
+        doc = agents_doc + "\n\n---\n\n" + api_doc;
+      }
+      return buildResponse(doc, "text/markdown; charset=UTF-8", CACHE_STATIC, 200, url);
+    } else if (url.pathname === "/agents.md" || url.pathname === "/AGENTS.md") {
+      // agents.md convention names the file; llms.txt is where we serve it
+      return buildResponse("see /llms.txt", DEFAULT_MIME_TEXT, { "Location": "/llms.txt" }, 301, url);
     } else if (url.pathname === "/favicon.svg") {
       // SVG favicon for browsers that accept it (via <link rel="icon">)
       return buildResponse(favicon_svg, "image/svg+xml", CACHE_STATIC, 200, url);

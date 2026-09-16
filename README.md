@@ -142,6 +142,8 @@ There's no bundler. `autoinsert.py` reads `worker.js`, inlines the files from `d
 ### Project Structure
 ```
 getpost/
+├── AGENTS.md            # guide for coding agents (agents.md convention; served at /llms.txt)
+├── getpost-api.md       # machine-readable API reference (served at /api)
 ├── worker.js            # the Cloudflare Worker (all request handling)
 ├── autoinsert.py        # build: embeds deps/ into worker.packed.js
 ├── deploy.sh            # build + upload to Cloudflare
@@ -177,8 +179,10 @@ node test_local.js       # offline unit tests — no deploy needed (node + pytho
 ## API Reference
 
 The complete machine-readable reference is [`getpost-api.md`](getpost-api.md), and every
-running instance self-hosts it at `/api` (also `/api.md` and `/llms.txt`) as `text/markdown`
-— point scripts or agents there. The essentials:
+running instance self-hosts it at `/api` (also `/api.md`) as `text/markdown` — point scripts
+or agents there. `/llms.txt` serves [`AGENTS.md`](AGENTS.md) (the [agents.md](https://agents.md/)
+guide for working on this repo) followed by the same reference, and `/agents.md` redirects to
+it. The essentials:
 
 ### Upload
 ```

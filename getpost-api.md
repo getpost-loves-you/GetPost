@@ -270,7 +270,9 @@ curl -X DELETE -H "Authorization: $NAMED_KEY" "$BASE/x/welcome"
 | Path | Returns | Content-Type | Cache |
 |---|---|---|---|
 | `GET /about` | about/docs HTML page | `text/html` | — |
-| `GET /api`, `/api.md`, `/llms.txt` | this document, verbatim markdown | `text/markdown` | 24 h |
+| `GET /api`, `/api.md` | this document, verbatim markdown | `text/markdown` | 24 h |
+| `GET /llms.txt` | the repo's `AGENTS.md` ([agents.md](https://agents.md/) guide) followed by this document | `text/markdown` | 24 h |
+| `GET /agents.md` | `301` redirect to `/llms.txt` | — | — |
 | `GET /pastebin-crypted.py` | the E2E-encrypted CLI client (self-hosted, byte-identical per instance) | `text/plain` | 24 h |
 | `GET /naclfast.min.js` | NaCl crypto library | `application/javascript` | 24 h |
 | `GET /argon2bundled.min.js` | Argon2 KDF library | `application/javascript` | 24 h |
