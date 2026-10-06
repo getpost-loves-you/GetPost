@@ -189,6 +189,30 @@ async function test(name, fn) {
     assert.ok(sandboxAttr[1].indexOf("allow-same-origin") === -1, "sandbox must not grant same-origin");
   });
 
+  await test("served upload page script is valid JS", async () => {
+    const html = await (await call("GET", "/post")).text();
+    const scripts = html.match(/<script>([\s\S]*?)<\/script>/g);
+    new vm.Script(scripts[scripts.length - 1].replace(/<\/?script>/g, ""));
+    assert.ok(html.includes('id="namedRow"') && html.indexOf('id="namedRow"') < html.indexOf('id="passwordSection"'),
+      "named row sits above the password section");
+  });
+
+  await test("viewer and server parse player start times the same way", () => {
+    // the viewer's copy of parseMediaTime is lifted out of the rendered page and
+    // run beside the worker's, so encrypted (fragment) and plaintext (query)
+    // links seek identically
+    const [html] = sandbox.generateHtmlBasedOnType(
+      new TextEncoder().encode("x").buffer, new URL("https://t.local/post?key=X"), null, null);
+    const src = html.match(/function parseMediaTime\(s\) \{[\s\S]*?\n    \}/)[0];
+    const clientParse = vm.runInNewContext("(" + src + ")");
+    const cases = { "90": 90, "12.5": 12.5, "90s": 90, "1:30": 90, "1:02:03": 3723, "1h2m3s": 3723,
+      "2m": 120, "": null, "abc": null, "1:": null, "h": null };
+    for (const [input, want] of Object.entries(cases)) {
+      assert.strictEqual(sandbox.parseMediaTime(input), want, `server ${input}`);
+      assert.strictEqual(clientParse(input), want, `viewer ${input}`);
+    }
+  });
+
   console.log("[type detection]");
 
   const detect = (bytes) =>
@@ -232,7 +256,7 @@ async function test(name, fn) {
     // explicit off values keep the redirect
     for (const v of ["0", "false", "no"]) {
       const [html] = render(`https://t.local/post?key=X&loop=${v}`);
-      assert.ok(!html.includes("<video autoplay loop"), `loop=${v} is off`);
+      assert.ok(!html.includes('class="gp-player"'), `loop=${v} is off`);
       assert.ok(html.includes("window.location.assign(window.location.href"), `loop=${v} still redirects`);
     }
     // webm too
@@ -242,18 +266,51 @@ async function test(name, fn) {
     assert.ok(/<video [^>]*\bloop\b/.test(webm), "webm loops");
   });
 
+  await test("player options: audio inline, t= seeks, explicit flags win", () => {
+    const mp4 = Uint8Array.from([0, 0, 0, 0x20, ...new TextEncoder().encode("ftypisom"), 0, 0, 2, 0]).buffer;
+    const flac = Uint8Array.from([0x66, 0x4c, 0x61, 0x43, 0, 0, 0, 0x22]).buffer;
+    const page = (buf, u) => sandbox.generateHtmlBasedOnType(buf, new URL(u), null, null)[0];
+    // the player tag split into its attribute list (src dropped, so flags in
+    // the url don't read as attributes) and its src
+    const player = (html) => {
+      const m = html.match(/<(video|audio) class="gp-player"([^>]*) src="([^"]*)"/);
+      return m && { tag: m[1], attrs: m[2], src: m[3] };
+    };
+
+    // audio: loop is just loop - no gif-style autoplay/mute
+    let p = player(page(flac, "https://t.local/post?key=X&loop"));
+    assert.ok(p && p.tag === "audio", "audio renders inline");
+    assert.ok(/\bloop\b/.test(p.attrs) && !/\bmuted\b/.test(p.attrs) && !/\bautoplay\b/.test(p.attrs), p.attrs);
+    // audio with no options still redirects to raw
+    assert.ok(page(flac, "https://t.local/post?key=X").includes("window.location.assign(window.location.href"));
+
+    // t= alone plays inline and seeks via a media fragment on the src
+    p = player(page(mp4, "https://t.local/x/vid?t=1m30s"));
+    assert.ok(p && p.src.endsWith("&amp;raw#t=90") && p.attrs.includes('data-start="90"'), p && p.src);
+    assert.ok(!/\bloop\b/.test(p.attrs) && !/\bautoplay\b/.test(p.attrs), "t alone sets nothing else");
+
+    // autoplay alone doesn't imply muted; loop's implied mute can be switched off
+    p = player(page(mp4, "https://t.local/post?key=X&autoplay"));
+    assert.ok(/\bautoplay\b/.test(p.attrs) && !/\bmuted\b/.test(p.attrs), p.attrs);
+    p = player(page(mp4, "https://t.local/post?key=X&loop&muted=0"));
+    assert.ok(/\bloop\b/.test(p.attrs) && /\bautoplay\b/.test(p.attrs) && !/\bmuted\b/.test(p.attrs), p.attrs);
+
+    // unparseable t and all-off flags are the same as no options
+    assert.ok(!player(page(mp4, "https://t.local/post?key=X&t=soon&autoplay=no")));
+  });
+
   await test("?loop is ignored on non-video content", () => {
     const at = (bytes, u) => sandbox.generateHtmlBasedOnType(Uint8Array.from(bytes).buffer, new URL(u), null, null);
     // png keeps the raw redirect
     const [png, pngType] = at([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "https://t.local/post?key=X&loop=true");
     assert.strictEqual(pngType, "image/png");
-    assert.ok(!png.includes("<video autoplay loop"), "no looping video for png");
+    assert.ok(!png.includes('class="gp-player"'), "no player for png");
     assert.ok(png.includes("window.location.assign(window.location.href"), "png still redirects");
     // markdown renders as usual
     const [md, mdType] = at(Array.from(new TextEncoder().encode("# hi")), "https://t.local/post?key=X&loop=true");
     assert.strictEqual(mdType, "text/raw; charset=UTF-8");
     assert.ok(md.includes("<h1"), "markdown still rendered");
-    assert.ok(!md.includes("<video autoplay loop"), "no looping video for text");
+    assert.ok(!md.includes('class="gp-player"'), "no player for text");
   });
 
   await test("isom mp4 with a 0x20 ftyp box (ffmpeg output) is video/mp4", () => {
@@ -540,6 +597,53 @@ async function test(name, fn) {
     assert.ok(resp.headers.get("content-type").includes("text/html"));
     resp = await call("GET", "/post?key=" + json.key + "&raw&content_type=not_a_mime");
     assert.strictEqual(resp.status, 400);
+  });
+
+  await test("raw responses are CSP-sandboxed (opaque origin), except pdf", async () => {
+    const sandboxed = (resp) => /^sandbox\b/.test(resp.headers.get("content-security-policy") || "") &&
+      !resp.headers.get("content-security-policy").includes("allow-same-origin");
+    const json = await uploadJson("<script>sessionStorage.getItem('getpost_named_key')</script>");
+    assert.ok(sandboxed(await call("GET", "/post?key=" + json.key + "&raw")), "sniffed raw");
+    assert.ok(sandboxed(await call("GET", "/post?key=" + json.key + "&raw&content_type=text/html")), "forced text/html");
+    // the viewer page itself runs our scripts in the real origin - not sandboxed
+    assert.ok(!(await call("GET", "/post?key=" + json.key)).headers.get("content-security-policy"));
+    const pdf = await uploadJson("%PDF-1.4 x");
+    const pdfResp = await call("GET", "/post?key=" + pdf.key + "&raw");
+    assert.ok(pdfResp.headers.get("content-type").startsWith("application/pdf"));
+    assert.strictEqual(pdfResp.headers.get("content-security-policy"), null, "pdf exempt");
+    // named pastes too
+    sandbox.NAMED_KEY = "named-secret";
+    try {
+      await call("POST", "/x/sbx", { body: "<b>x</b>", headers: { Authorization: "named-secret" } });
+      assert.ok(sandboxed(await call("GET", "/x/sbx?raw")), "named raw");
+    } finally {
+      delete sandbox.NAMED_KEY;
+    }
+  });
+
+  await test("raw honors single byte ranges (media seeking), never caches partials", async () => {
+    const json = await uploadJson(Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+    const path = "/post?key=" + json.key + "&raw";
+    const bytes = async (resp) => Array.from(new Uint8Array(await resp.arrayBuffer()));
+    let resp = await call("GET", path, { headers: { Range: "bytes=2-4" } });
+    assert.strictEqual(resp.status, 206);
+    assert.strictEqual(resp.headers.get("content-range"), "bytes 2-4/10");
+    assert.deepStrictEqual(await bytes(resp), [2, 3, 4]);
+    assert.ok(!sandbox.caches.store.has("https://test.local" + path), "206 not cached");
+    resp = await call("GET", path, { headers: { Range: "bytes=7-" } });
+    assert.deepStrictEqual(await bytes(resp), [7, 8, 9]);
+    resp = await call("GET", path, { headers: { Range: "bytes=-2" } });
+    assert.deepStrictEqual(await bytes(resp), [8, 9]);
+    resp = await call("GET", path, { headers: { Range: "bytes=5-99" } });
+    assert.strictEqual(resp.headers.get("content-range"), "bytes 5-9/10");
+    resp = await call("GET", path, { headers: { Range: "bytes=10-" } });
+    assert.strictEqual(resp.status, 416);
+    assert.strictEqual(resp.headers.get("content-range"), "bytes */10");
+    // multi-range or junk: whole body, advertised as rangeable
+    resp = await call("GET", path, { headers: { Range: "bytes=0-1,4-5" } });
+    assert.strictEqual(resp.status, 200);
+    assert.strictEqual(resp.headers.get("accept-ranges"), "bytes");
+    assert.strictEqual((await bytes(resp)).length, 10);
   });
 
   await test("encrypted upload flagged for the viewer", async () => {

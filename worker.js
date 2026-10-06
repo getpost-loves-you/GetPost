@@ -42,6 +42,16 @@ const CACHE_STATIC = {
 const CACHE_CONTENT = {
   "Cache-Control": "public, max-age=300"
 };
+// raw bytes are attacker-controlled and served from this origin (and anyone can
+// ask for ?content_type=text/html). a CSP sandbox without allow-same-origin gives
+// the document an opaque origin: scripts may run, but can't read this origin's
+// cookies/storage (e.g. the operator key the upload page keeps in sessionStorage)
+// or make same-origin requests - the same policy as the decrypted-html iframe.
+// PDFs are exempt: browsers refuse to render them in a sandboxed document, and
+// their scripts run inside the pdf viewer, not in this origin.
+const RAW_SANDBOX = {
+  "Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms"
+};
 
 addEventListener("fetch", (fetch_event) => {
   // configure primary entrypoint
@@ -250,12 +260,11 @@ expires at: ${responseData.expires_at}`;
             }
 
             // if requested as raw, return the original resp object with detected or custom MIME type
-            return cacheAndReturn(fetch_event, edgeCache, buildResponse(
+            return cacheAndReturn(fetch_event, edgeCache, buildRawResponse(
               contentFromKeyAsArrayBuffer,
               responseContentType,
-              CACHE_CONTENT,
-              200,
               url,
+              requestHeadersAndFriends["range"],
             ));
           }
           // otherwise, return the wrapped body with the text/html mimetype
@@ -482,12 +491,11 @@ expires at: ${responseData.expires_at}`;
             // raw needs only the sniffed type - skip building the whole page
             responseContentType = detectContent(contentFromKeyAsArrayBuffer).type;
           }
-          return cacheAndReturn(fetch_event, edgeCache, buildResponse(
+          return cacheAndReturn(fetch_event, edgeCache, buildRawResponse(
             contentFromKeyAsArrayBuffer,
             responseContentType,
-            CACHE_CONTENT,
-            200,
             url,
+            requestHeadersAndFriends["range"],
           ));
         } else {
           const [generatedBodyHtml] = generateHtmlBasedOnType(
@@ -641,9 +649,10 @@ function isValidContentType(contentType) {
   return true;
 }
 
-// store a content response in the PoP-local cache and return it (the Cache API only accepts GET)
+// store a content response in the PoP-local cache and return it (the Cache API
+// only accepts GET, and refuses partial 206s - a cached full body serves ranges itself)
 function cacheAndReturn(fetch_event, edgeCache, response) {
-  if (fetch_event.request.method === "GET") {
+  if (fetch_event.request.method === "GET" && response.status === 200) {
     fetch_event.waitUntil(edgeCache.put(fetch_event.request, response.clone()));
   }
   return response;
@@ -965,6 +974,62 @@ function detectContent(content) {
   return { type: DEFAULT_MIME_TEXT, text: contentAsString };
 }
 
+// media player options: loop, autoplay, muted and t (start time). the flags are
+// presence-only like ?raw, except an explicit 0/false/no/off turns one off.
+// returns null when none is on, so plain media links keep the raw redirect.
+// for video, loop alone means gif-style: autoplay (which browsers only allow
+// muted) unless autoplay/muted are set explicitly. the viewer page applies the
+// same rules to encrypted media, reading them from the link fragment.
+function parsePlayerOpts(params, type) {
+  const flag = (k) => params.has(k) && !/^(0|false|no|off)$/i.test(params.get(k));
+  if (!["loop", "autoplay", "muted", "t"].some((k) => params.has(k))) return null;
+  const isVideo = type.startsWith("video/");
+  const loop = flag("loop");
+  const gifStyle = isVideo && loop;
+  const opts = {
+    loop,
+    autoplay: params.has("autoplay") ? flag("autoplay") : gifStyle,
+    muted: params.has("muted") ? flag("muted") : gifStyle,
+    t: parseMediaTime(params.get("t")),
+  };
+  // all off (?loop=0) is the same as none given
+  return (opts.loop || opts.autoplay || opts.muted || opts.t) ? opts : null;
+}
+
+// start time as seconds: "90", "12.5", "1:30", "1:02:03" or "1h2m3s" (null if unparseable)
+function parseMediaTime(s) {
+  if (!s) return null;
+  let m;
+  if ((m = /^(\d+(?:\.\d+)?)s?$/.exec(s))) return parseFloat(m[1]);
+  if ((m = /^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/.exec(s))) {
+    return (parseInt(m[1] || "0", 10) * 3600) + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+  }
+  if ((m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(s)) && (m[1] || m[2] || m[3])) {
+    return parseInt(m[1] || "0", 10) * 3600 + parseInt(m[2] || "0", 10) * 60 + parseFloat(m[3] || "0");
+  }
+  return null;
+}
+
+// inline <video>/<audio> for a player-options page. the start time goes in
+// data-start, which the viewer script seeks to once metadata loads (browsers
+// don't reliably honor a #t= media fragment); the fragment stays on the src as
+// a hint for clients without script.
+function mediaPlayerHtml(type, rawUrl, opts) {
+  const isVideo = type.startsWith("video/");
+  const src = sanitizeHtml(rawUrl + (opts.t ? "#t=" + opts.t : ""));
+  const attrs = ["controls"];
+  if (opts.t) attrs.push(`data-start="${opts.t}"`);
+  if (isVideo) attrs.push("playsinline");
+  if (opts.autoplay) attrs.push("autoplay");
+  if (opts.loop) attrs.push("loop");
+  if (opts.muted) attrs.push("muted");
+  const style = isVideo ?
+    "display:block;max-width:100%;max-height:90vh;margin:0 auto" :
+    "display:block;width:100%";
+  const tag = isVideo ? "video" : "audio";
+  return `<${tag} class="gp-player" ${attrs.join(" ")} src="${src}" style="${style}"></${tag}>`;
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -980,12 +1045,11 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   }
   const { type, text: decodedText } = detectContent(content);
   let injectorScript;
-  // ?loop (or loop=true): play video inline on a looping <video> instead of
-  // redirecting to the raw bytes. presence-only like ?raw, except an explicit
-  // loop=0/false/no is off. ignored for everything that isn't video.
-  const loopParam = url && url.searchParams ? url.searchParams.get("loop") : null;
-  const loopVideo = loopParam !== null && !/^(0|false|no|off)$/i.test(loopParam);
-  let loopVideoHtml = "";
+  // player options (?loop, ?autoplay, ?muted, ?t=): any of them plays audio or
+  // video inline on this page instead of redirecting to the raw bytes. ignored
+  // for everything else; encrypted media gets the same options client-side.
+  const playerOpts = url && url.searchParams ? parsePlayerOpts(url.searchParams, type) : null;
+  let playerHtml = "";
 
   switch (type) {
     case "application/x-encrypted":
@@ -995,16 +1059,18 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "video/mp4":
     case "video/quicktime":
     case "video/webm":
-      if (loopVideo) {
-        // gif-style loop: autoplay only works muted, so mute and keep the
-        // controls so the viewer can unmute. src is this page's own raw url.
-        const rawSrc = sanitizeHtml(url.toString() + (url.search ? "&raw" : "?raw"));
-        loopVideoHtml = `<video autoplay loop muted playsinline controls src="${rawSrc}" ` +
-          `style="display:block;max-width:100%;max-height:90vh;margin:0 auto"></video>`;
+    case "audio/mp3":
+    case "audio/ogg":
+    case "audio/flac":
+    case "audio/wav":
+    case "audio/mp4":
+      if (playerOpts) {
+        // src is this page's own raw url
+        playerHtml = mediaPlayerHtml(type, url.toString() + (url.search ? "&raw" : "?raw"), playerOpts);
         injectorScript = "";
         break;
       }
-      // no loop flag: fall through to the raw redirect with the rest
+      // no player options: fall through to the raw redirect with the rest
     // everything below redirects to raw: browsers render all of these natively.
     // crawlers don't run the JS redirect, so og/meta previews still work.
     case "image/png":
@@ -1012,11 +1078,6 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "image/jpeg":
     case "image/webp":
     case "image/svg+xml":
-    case "audio/mp3":
-    case "audio/ogg":
-    case "audio/flac":
-    case "audio/wav":
-    case "audio/mp4":
     case "image/heic":
     case "application/pdf":
     case "application/zip":
@@ -1072,9 +1133,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   } else if (type === "text/x-url") {
     // don't render the URL as page content - the viewer JS owns the display
     description = "GetPost: redirect";
-  } else if (loopVideoHtml) {
-    contentAsHtmlFromMarked = loopVideoHtml;
-    description = "GetPost: looping " + type;
+  } else if (playerHtml) {
+    contentAsHtmlFromMarked = playerHtml;
+    description = "GetPost: " + type + (playerOpts.loop ? " (looping)" : "");
   } else {
     description = "GetPost: " + type;
   }
@@ -1088,6 +1149,35 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   const previewImage = imageUrl || iconUrl;
   const contentAsWrappedHtml = `AUTOINSERT_GETPOST__HTML`; // eslint-disable-line
   return [contentAsWrappedHtml, type];
+}
+
+// raw content response: cacheable, sandboxed unless it's a pdf (see RAW_SANDBOX),
+// and range-capable - browsers treat media they can't fetch by range as
+// unseekable (no scrubbing, no ?t= start time). a single "bytes=a-b", "a-" or
+// "-n" range gets a 206; anything else (multi-range, junk) gets the whole body.
+function buildRawResponse(blob, type, url, rangeHeader) {
+  const isPdf = type.toLowerCase().startsWith("application/pdf");
+  const headers = Object.assign({ "Accept-Ranges": "bytes" }, CACHE_CONTENT, isPdf ? {} : RAW_SANDBOX);
+  const m = rangeHeader && /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!m || (m[1] === "" && m[2] === "")) {
+    return buildResponse(blob, type, headers, 200, url);
+  }
+  const size = blob.byteLength;
+  let start, end;
+  if (m[1] === "") {
+    // suffix range: the last n bytes
+    start = Math.max(0, size - parseInt(m[2], 10));
+    end = size - 1;
+  } else {
+    start = parseInt(m[1], 10);
+    end = m[2] === "" ? size - 1 : Math.min(parseInt(m[2], 10), size - 1);
+  }
+  if (start >= size || start > end) {
+    headers["Content-Range"] = `bytes */${size}`;
+    return buildResponse("Sorry, requested range not satisfiable!", DEFAULT_MIME_TEXT, headers, 416, url);
+  }
+  headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+  return buildResponse(blob.slice(start, end + 1), type, headers, 206, url);
 }
 
 function buildResponse(

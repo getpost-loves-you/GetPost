@@ -55,7 +55,10 @@ ciphertext    (remainder)
 - Cipher: NaCl `secretbox` (XSalsa20-Poly1305).
 - The passphrase travels only in the URL **fragment** (`#...`), which browsers never send
   to the server. Fragment layout used by the viewer:
-  `#;;;<passphrase>;;;<mime-type>;;;<filename>`.
+  `#;;;<passphrase>;;;<mime-type>;;;<filename>[;;;<player options>]`.
+  An optional field after the filename takes the same player options as the query
+  string, in query syntax (`loop&t=30`), and applies them to decrypted audio/video — so
+  they stay client-side along with the passphrase.
 
 CLI uploads via `POST /post` are stored **as sent** — i.e. unencrypted unless you encrypt
 first. Use the bundled `pastebin-crypted.py` client (served at `/pastebin-crypted.py`) to
@@ -165,19 +168,33 @@ echo "hello" | curl -H "X-TTL: 3600" --data-binary @- "$BASE/post"
 
 - Without `key`: returns the **upload HTML page** (`200`).
 - With `key`, no `raw`: returns the **HTML viewer** wrapping the content (markdown render
-  for text, decrypt UI for GPE1, redirect countdown for `text/x-url`, looping `<video>` for
-  video with `?loop`, and a JS auto-redirect to `&raw` for images, audio, video and other
+  for text, decrypt UI for GPE1, redirect countdown for `text/x-url`, an inline
+  `<video>`/`<audio>` player for media with player options (below), and a JS
+  auto-redirect to `&raw` for images, audio, video and other
   binary — crawlers don't run it, so `og:image`/meta previews still work).
 - With `key` and `raw`: returns the **original bytes** with the sniffed MIME type.
+  Single byte ranges (`Range: bytes=a-b`, `a-`, `-n`) get `206` (`416` when out of
+  bounds), so media can be scrubbed and seeked. Raw responses carry
+  `Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms` (PDFs
+  excepted, since browsers won't render them sandboxed): uploaded HTML/SVG opened raw runs
+  in an opaque origin and can't read this origin's storage.
 
 `HEAD` is served via the same path (body stripped by the runtime) — useful for link-preview
 crawlers.
 
 **Query params**
 - `raw` (presence) — return original bytes instead of the HTML viewer.
-- `loop` (presence, e.g. `loop=true`) — for video content, play it inline on a looping,
-  muted `<video>` with controls instead of redirecting to `&raw`. Ignored on non-video
-  content. `loop=0`/`false`/`no` turns it off.
+- Player options, for audio and video — any of them plays the media inline (with
+  controls) instead of redirecting to `&raw`; ignored for other content. Flags are
+  presence-only (`loop`, `loop=1`); `0`/`false`/`no`/`off` turns one off, and all-off is
+  the same as none.
+  - `loop` — repeat. On video, `loop` alone is gif-style: it also autoplays muted
+    (browsers only allow muted autoplay) unless `autoplay`/`muted` are given explicitly.
+  - `autoplay` — start playing. A video the browser refuses to autoplay with sound
+    retries muted.
+  - `muted` — start muted.
+  - `t=<time>` — start position: `90`, `12.5`, `1:30`, `1:02:03` or `1h2m3s`.
+  - For encrypted media the same options go in the fragment, after the filename (see above).
 - `content_type=<mime>` — override the response `Content-Type` for `raw` reads. Validated;
   invalid value → `400`.
 - `title=<text>` — custom `<title>`/`og:title` for the viewer page (HTML-sanitized, max
@@ -195,7 +212,9 @@ crawlers.
 ```sh
 curl -s "$BASE/post?key=01ARZ...&raw"                  # original bytes
 curl -s "$BASE/post?key=01ARZ...&raw&content_type=text/html"
-open "$BASE/post?key=01ARZ...&loop=true"               # video, looping inline
+open "$BASE/post?key=01ARZ...&loop"                    # video, gif-style loop
+open "$BASE/post?key=01ARZ...&t=1m30s&autoplay"        # start 90s in
+open "$BASE/post?key=01ARZ...#;;;pass;;;video%2Fmp4;;;v.mp4;;;loop%26t%3D5"  # encrypted
 curl -sI "$BASE/post?key=01ARZ..."                     # HEAD
 ```
 
@@ -233,7 +252,8 @@ binding (otherwise writes return `403`).
   ≥60 s like `/post`).
 
 #### `GET /x/<name>` (and `HEAD`)
-Public read. Same `raw`, `loop`, `content_type`, `title`, `lang`, `cors` params as `GET /post`.
+Public read. Same `raw`, player options, `content_type`, `title`, `lang`, `cors` params
+as `GET /post`.
 - `200` — HTML viewer, or raw bytes with `?raw`.
 - `404` — name not found or invalid.
 

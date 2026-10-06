@@ -559,12 +559,13 @@ input[type="file"] { display: none; }
     <div class="root-status" id="rootStatus"></div>
 </div>
 
+<div class="named-row" id="namedRow" style="display: none;">
+    <label class="named-label" for="namedName">publish at /x/</label>
+    <input type="text" id="namedName" placeholder="my-page" spellcheck="false" autocomplete="off">
+    <label class="named-overwrite"><input type="checkbox" id="namedOverwrite"> overwrite</label>
+</div>
+
 <div class="password-section" id="passwordSection">
-    <div class="named-row" id="namedRow" style="display: none;">
-        <label class="named-label" for="namedName">publish at /x/</label>
-        <input type="text" id="namedName" placeholder="my-page" spellcheck="false" autocomplete="off">
-        <label class="named-overwrite"><input type="checkbox" id="namedOverwrite"> overwrite</label>
-    </div>
     <label class="encrypt-row"><input type="checkbox" id="encryptToggle" checked> encrypt (e2e)</label>
     <label class="encrypt-row" id="indexRow" style="display: none;"><input type="checkbox" id="indexToggle"> create index page (one link listing all files)</label>
     <div class="password-label" id="passphraseLabel">passphrase (auto-generated, click to edit):</div>
@@ -732,10 +733,11 @@ function renderFileList() {
     }
 
     // the index option only makes sense for a batch
-    document.getElementById('indexRow').style.display = selectedFiles.length > 1 ? 'flex' : 'none';
+    document.getElementById('indexRow').style.display =
+        (selectedFiles.length > 1 && namedKey === null) ? 'flex' : 'none';
 
     pw.classList.add('active');
-    if (!document.getElementById('passphrase').value) {
+    if (!document.getElementById('passphrase').value && !keepingOldPassphrase()) {
         document.getElementById('passphrase').value = generatePassphrase();
     }
     updateUploadLabel();
@@ -757,7 +759,7 @@ function enterTextMode() {
     ta.classList.add('active');
     ta.focus();
     document.getElementById('passwordSection').classList.add('active');
-    if (!document.getElementById('passphrase').value) {
+    if (!document.getElementById('passphrase').value && !keepingOldPassphrase()) {
         document.getElementById('passphrase').value = generatePassphrase();
     }
     updateUploadLabel();
@@ -936,13 +938,14 @@ function uploadBlob(payload, progressLabel, opts) {
         });
 
         xhr.onload = function() {
+            var named = !!opts.path;
             if (xhr.status >= 200 && xhr.status < 300 && xhr.response && xhr.response.share_url) {
                 resolve(xhr.response);
-            } else if (xhr.status === 401) {
+            } else if (named && xhr.status === 401) {
                 reject(new Error('named-paste key rejected (401) - re-check NAMED_KEY'));
-            } else if (xhr.status === 403) {
+            } else if (named && xhr.status === 403) {
                 reject(new Error('named pastes not enabled on this instance (403)'));
-            } else if (xhr.status === 409) {
+            } else if (named && xhr.status === 409) {
                 reject(new Error('/x/ name already exists - tick overwrite to replace it'));
             } else {
                 reject(new Error('upload failed (' + xhr.status + ')'));
@@ -1025,7 +1028,12 @@ async function doUpload() {
         // with a single salt, then give each file its own random nonce - secretbox
         // key reuse across messages is safe as long as nonces are fresh
         var key = null, salt = null;
-        if (encrypt) {
+        if (named && encrypt && document.getElementById('namedOverwrite').checked) {
+            var kept = await keyForOverwrite(namedName, password);
+            if (kept === false) return; // mismatch - warned, waiting for a second click
+            if (kept) { key = kept.key; salt = kept.salt; }
+        }
+        if (encrypt && !key) {
             setStatus('<span class="spinner">|</span> deriving key (argon2id)...');
             await new Promise(function(r) { setTimeout(r, 50); });
             salt = nacl.randomBytes(16);
@@ -1170,6 +1178,79 @@ document.getElementById('encryptToggle').addEventListener('change', function() {
     setEncryptMode(this.checked);
 });
 
+// --- overwriting an encrypted named paste keeps its links working ---
+// links to /x/<name> carry the passphrase in the fragment, so re-encrypting under
+// a fresh passphrase would break every link shared before. on overwrite, check
+// the passphrase against the existing paste first: if it opens it, reuse that
+// paste's salt so the (slow) derived key doubles as the new key - same key,
+// fresh nonce, so old links decrypt the new content. a mismatch warns once;
+// clicking publish again with the same name and passphrase goes ahead.
+var overwriteBreakArmed = null;
+
+// overwrite ticked in named mode: the passphrase field waits for the old one
+function keepingOldPassphrase() {
+    return namedKey !== null && document.getElementById('namedOverwrite').checked;
+}
+
+// resolves { key, salt } to reuse, null when there's nothing to keep (no
+// existing paste, or it isn't encrypted), or false on a warned mismatch
+async function keyForOverwrite(name, password) {
+    var resp = await fetch('/x/' + encodeURIComponent(name) + '?raw', { cache: 'no-store', credentials: 'omit' });
+    if (!resp.ok) return null;
+    var old = new Uint8Array(await resp.arrayBuffer());
+    var nonceLen = nacl.secretbox.nonceLength;
+    var isGpe1 = old.length > 21 + nonceLen && old[0] === 0 && old[1] === 0x47 &&
+        old[2] === 0x50 && old[3] === 0x45 && old[4] === 0x31;
+    if (!isGpe1) return null;
+    setStatus('<span class="spinner">|</span> checking passphrase against the existing /x/' + name + '...');
+    await new Promise(function(r) { setTimeout(r, 50); });
+    var salt = old.slice(5, 21);
+    var key = await deriveKey(password, salt);
+    if (nacl.secretbox.open(old.slice(21 + nonceLen), old.slice(21, 21 + nonceLen), key)) {
+        overwriteBreakArmed = null;
+        return { key: key, salt: salt };
+    }
+    var armed = name + NL + password;
+    if (overwriteBreakArmed === armed) {
+        overwriteBreakArmed = null;
+        return null; // confirmed: publish under the new passphrase
+    }
+    overwriteBreakArmed = armed;
+    setStatus('warning: this passphrase does not open the existing /x/' + name +
+        ' - links shared before would stop working. paste its old link or passphrase, ' +
+        'or click publish again to replace it anyway', 'err');
+    return false;
+}
+
+// pasting an old share link into the passphrase field keeps just its passphrase
+document.getElementById('passphrase').addEventListener('input', function() {
+    var v = this.value;
+    var at = v.indexOf('#;;;');
+    if (at === -1) return;
+    var parts = v.slice(at + 1).split(';;;');
+    if (parts[1]) {
+        try { this.value = decodeURIComponent(parts[1]); } catch (e) { this.value = parts[1]; }
+    }
+});
+
+// ticking overwrite on an encrypted paste swaps the generated passphrase for a
+// prompt to enter the old one; unticking restores a fresh generated one
+document.getElementById('namedOverwrite').addEventListener('change', function() {
+    var pw = document.getElementById('passphrase');
+    var label = document.getElementById('passphraseLabel');
+    if (this.checked) {
+        pw.value = '';
+        pw.placeholder = 'existing passphrase, or paste an old /x/ link';
+        pw.removeAttribute('readonly');
+        label.textContent = 'passphrase (reuse the old one so existing links keep working):';
+    } else {
+        pw.value = generatePassphrase();
+        pw.placeholder = '';
+        label.textContent = 'passphrase (auto-generated, click to edit):';
+    }
+    overwriteBreakArmed = null;
+});
+
 // --- hidden operator mode: named pastes at /x/<name> ---
 // the NAMED_KEY is held in memory (namedKey) and mirrored to sessionStorage so
 // it survives a reload within the tab but never touches disk and is gone on
@@ -1192,7 +1273,28 @@ function applyNamedState() {
     // named pastes are single-blob and operator-only; the index option (a batch
     // feature) has no meaning here, so keep it hidden while unlocked
     if (unlocked) document.getElementById('indexRow').style.display = 'none';
+    setNeverTtl(unlocked);
     updateUploadLabel();
+}
+
+// named pastes can be permanent: offer (and default to) 'never' while unlocked,
+// restoring the previous choice on lock. X-TTL 0 is the server's permanent value
+var ttlBeforeUnlock = null;
+function setNeverTtl(on) {
+    var sel = document.getElementById('ttlSelect');
+    var never = document.getElementById('ttlNever');
+    if (on && !never) {
+        ttlBeforeUnlock = sel.value;
+        never = document.createElement('option');
+        never.id = 'ttlNever';
+        never.value = '0';
+        never.textContent = 'never';
+        sel.appendChild(never);
+        sel.value = '0';
+    } else if (!on && never) {
+        sel.removeChild(never);
+        if (ttlBeforeUnlock !== null) sel.value = ttlBeforeUnlock;
+    }
 }
 
 function unlockNamed() {
@@ -1209,6 +1311,11 @@ function lockNamed() {
     namedKey = null;
     try { sessionStorage.removeItem('getpost_named_key'); } catch (e) {}
     setRootStatus('locked - back to normal uploads', '');
+    var ow = document.getElementById('namedOverwrite');
+    if (ow.checked) {
+        ow.checked = false;
+        ow.dispatchEvent(new Event('change'));
+    }
     applyNamedState();
 }
 

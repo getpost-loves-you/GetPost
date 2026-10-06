@@ -573,6 +573,9 @@ body {
                         if (parts.length >= 4 && parts[3]) {
                             originalFilename = decodeURIComponent(parts[3]);
                         }
+                        if (parts.length >= 5 && parts[4]) {
+                            fragmentPlayerParams = new URLSearchParams(decodeURIComponent(parts[4]));
+                        }
                         showStatus('passphrase loaded, decrypting...', 'info');
                         setTimeout(function() { decryptContent(); }, 500);
                         // keep the fragment: stripping it made the address-bar URL unshareable
@@ -806,10 +809,9 @@ body {
             if (canDisplayInline) {
                 if (mimeType.startsWith('image/')) {
                     decryptedDiv.innerHTML = '<img src="' + blobUrl + '" style="max-width: 100%; height: auto;">';
-                } else if (mimeType.startsWith('video/')) {
-                    decryptedDiv.innerHTML = '<video controls style="max-width: 100%;"><source src="' + blobUrl + '" type="' + mimeType + '"></video>';
-                } else if (mimeType.startsWith('audio/')) {
-                    decryptedDiv.innerHTML = '<audio controls style="width: 100%;"><source src="' + blobUrl + '" type="' + mimeType + '"></audio>';
+                } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+                    decryptedDiv.innerHTML = '';
+                    decryptedDiv.appendChild(buildMediaPlayer(mimeType, blobUrl));
                 } else if (mimeType === 'application/pdf') {
                     decryptedDiv.innerHTML = '<iframe src="' + blobUrl + '" style="width: 100%; height: 600px; border: none;"></iframe>';
                 }
@@ -817,6 +819,88 @@ body {
                 decryptedDiv.innerHTML = '<p>Binary content decrypted.</p>';
             }
         }
+    }
+
+    // --- media player options: loop, autoplay, muted, t (start time) ---
+    // same rules as the server's parsePlayerOpts. encrypted links carry them in
+    // a fragment field after the filename (#;;;pass;;;type;;;name;;;loop&t=30),
+    // which never reaches the server; query parameters work too, but are sent.
+    var fragmentPlayerParams = null;
+
+    function playerOptsFor(mimeType) {
+        var params = new URLSearchParams(window.location.search);
+        if (fragmentPlayerParams) {
+            fragmentPlayerParams.forEach(function(v, k) { params.set(k, v); });
+        }
+        var keys = ['loop', 'autoplay', 'muted', 't'];
+        if (!keys.some(function(k) { return params.has(k); })) return null;
+        function flag(k) {
+            return params.has(k) && !/^(0|false|no|off)$/i.test(params.get(k));
+        }
+        var gifStyle = mimeType.startsWith('video/') && flag('loop');
+        var opts = {
+            loop: flag('loop'),
+            autoplay: params.has('autoplay') ? flag('autoplay') : gifStyle,
+            muted: params.has('muted') ? flag('muted') : gifStyle,
+            t: parseMediaTime(params.get('t'))
+        };
+        return (opts.loop || opts.autoplay || opts.muted || opts.t) ? opts : null;
+    }
+
+    // "90", "12.5", "1:30", "1:02:03" or "1h2m3s" to seconds (null if unparseable)
+    function parseMediaTime(s) {
+        if (!s) return null;
+        var m = /^([0-9]+([.][0-9]+)?)s?$/.exec(s);
+        if (m) return parseFloat(m[1]);
+        m = /^(?:([0-9]+):)?([0-9]+):([0-9]+(?:[.][0-9]+)?)$/.exec(s);
+        if (m) return parseInt(m[1] || '0', 10) * 3600 + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+        m = /^(?:([0-9]+)h)?(?:([0-9]+)m)?(?:([0-9]+(?:[.][0-9]+)?)s)?$/.exec(s);
+        if (m && (m[1] || m[2] || m[3])) {
+            return parseInt(m[1] || '0', 10) * 3600 + parseInt(m[2] || '0', 10) * 60 + parseFloat(m[3] || '0');
+        }
+        return null;
+    }
+
+    // start playback; browsers refuse unmuted autoplay without a user gesture,
+    // so a refused video retries muted (controls stay up to unmute). audio just
+    // waits for the play button - muted audio is pointless.
+    function startPlayback(el) {
+        var p = el.play();
+        if (!p || !p.catch) return;
+        p.catch(function() {
+            if (el.tagName !== 'VIDEO' || el.muted) return;
+            el.muted = true;
+            el.play().catch(function() {});
+        });
+    }
+
+    // jump to the start time once the duration is known (again after a src change)
+    function seekOnLoad(el, t) {
+        el.addEventListener('loadedmetadata', function() { el.currentTime = t; });
+        if (el.readyState >= 1) el.currentTime = t;
+    }
+
+    // <video>/<audio> for decrypted media, honoring the player options. muted is
+    // set as a property: the attribute alone doesn't mute a script-built element.
+    function buildMediaPlayer(mimeType, blobUrl) {
+        var isVideo = mimeType.startsWith('video/');
+        var el = document.createElement(isVideo ? 'video' : 'audio');
+        el.controls = true;
+        if (isVideo) {
+            el.playsInline = true;
+            el.style.cssText = 'display:block;max-width:100%;max-height:90vh;margin:0 auto';
+        } else {
+            el.style.cssText = 'display:block;width:100%';
+        }
+        var opts = playerOptsFor(mimeType);
+        if (opts) {
+            el.loop = opts.loop;
+            el.muted = opts.muted;
+            if (opts.t) seekOnLoad(el, opts.t);
+        }
+        el.src = blobUrl;
+        if (opts && opts.autoplay) startPlayback(el);
+        return el;
     }
 
     function toggleDecryptPasswordVisibility() {
@@ -837,6 +921,14 @@ body {
             if (e.key === 'Enter') decryptContent();
         });
     }
+
+    // server-rendered players (plaintext media with player options): seek to
+    // data-start, and the same muted retry for autoplay
+    document.querySelectorAll('.gp-player').forEach(function(el) {
+        var t = parseFloat(el.getAttribute('data-start'));
+        if (t > 0) seekOnLoad(el, t);
+        if (el.autoplay) startPlayback(el);
+    });
 
     window.addEventListener('load', async function() {
         // the url shortlink path needs no crypto libs - run it before the guard

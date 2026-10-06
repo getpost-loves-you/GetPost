@@ -279,6 +279,16 @@ const CACHE_STATIC = {
 const CACHE_CONTENT = {
   "Cache-Control": "public, max-age=300"
 };
+// raw bytes are attacker-controlled and served from this origin (and anyone can
+// ask for ?content_type=text/html). a CSP sandbox without allow-same-origin gives
+// the document an opaque origin: scripts may run, but can't read this origin's
+// cookies/storage (e.g. the operator key the upload page keeps in sessionStorage)
+// or make same-origin requests - the same policy as the decrypted-html iframe.
+// PDFs are exempt: browsers refuse to render them in a sandboxed document, and
+// their scripts run inside the pdf viewer, not in this origin.
+const RAW_SANDBOX = {
+  "Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms"
+};
 
 addEventListener("fetch", (fetch_event) => {
   // configure primary entrypoint
@@ -996,12 +1006,13 @@ input[type="file"] { display: none; }
     <div class="root-status" id="rootStatus"></div>
 </div>
 
+<div class="named-row" id="namedRow" style="display: none;">
+    <label class="named-label" for="namedName">publish at /x/</label>
+    <input type="text" id="namedName" placeholder="my-page" spellcheck="false" autocomplete="off">
+    <label class="named-overwrite"><input type="checkbox" id="namedOverwrite"> overwrite</label>
+</div>
+
 <div class="password-section" id="passwordSection">
-    <div class="named-row" id="namedRow" style="display: none;">
-        <label class="named-label" for="namedName">publish at /x/</label>
-        <input type="text" id="namedName" placeholder="my-page" spellcheck="false" autocomplete="off">
-        <label class="named-overwrite"><input type="checkbox" id="namedOverwrite"> overwrite</label>
-    </div>
     <label class="encrypt-row"><input type="checkbox" id="encryptToggle" checked> encrypt (e2e)</label>
     <label class="encrypt-row" id="indexRow" style="display: none;"><input type="checkbox" id="indexToggle"> create index page (one link listing all files)</label>
     <div class="password-label" id="passphraseLabel">passphrase (auto-generated, click to edit):</div>
@@ -1169,10 +1180,11 @@ function renderFileList() {
     }
 
     // the index option only makes sense for a batch
-    document.getElementById('indexRow').style.display = selectedFiles.length > 1 ? 'flex' : 'none';
+    document.getElementById('indexRow').style.display =
+        (selectedFiles.length > 1 && namedKey === null) ? 'flex' : 'none';
 
     pw.classList.add('active');
-    if (!document.getElementById('passphrase').value) {
+    if (!document.getElementById('passphrase').value && !keepingOldPassphrase()) {
         document.getElementById('passphrase').value = generatePassphrase();
     }
     updateUploadLabel();
@@ -1194,7 +1206,7 @@ function enterTextMode() {
     ta.classList.add('active');
     ta.focus();
     document.getElementById('passwordSection').classList.add('active');
-    if (!document.getElementById('passphrase').value) {
+    if (!document.getElementById('passphrase').value && !keepingOldPassphrase()) {
         document.getElementById('passphrase').value = generatePassphrase();
     }
     updateUploadLabel();
@@ -1373,13 +1385,14 @@ function uploadBlob(payload, progressLabel, opts) {
         });
 
         xhr.onload = function() {
+            var named = !!opts.path;
             if (xhr.status >= 200 && xhr.status < 300 && xhr.response && xhr.response.share_url) {
                 resolve(xhr.response);
-            } else if (xhr.status === 401) {
+            } else if (named && xhr.status === 401) {
                 reject(new Error('named-paste key rejected (401) - re-check NAMED_KEY'));
-            } else if (xhr.status === 403) {
+            } else if (named && xhr.status === 403) {
                 reject(new Error('named pastes not enabled on this instance (403)'));
-            } else if (xhr.status === 409) {
+            } else if (named && xhr.status === 409) {
                 reject(new Error('/x/ name already exists - tick overwrite to replace it'));
             } else {
                 reject(new Error('upload failed (' + xhr.status + ')'));
@@ -1462,7 +1475,12 @@ async function doUpload() {
         // with a single salt, then give each file its own random nonce - secretbox
         // key reuse across messages is safe as long as nonces are fresh
         var key = null, salt = null;
-        if (encrypt) {
+        if (named && encrypt && document.getElementById('namedOverwrite').checked) {
+            var kept = await keyForOverwrite(namedName, password);
+            if (kept === false) return; // mismatch - warned, waiting for a second click
+            if (kept) { key = kept.key; salt = kept.salt; }
+        }
+        if (encrypt && !key) {
             setStatus('<span class="spinner">|</span> deriving key (argon2id)...');
             await new Promise(function(r) { setTimeout(r, 50); });
             salt = nacl.randomBytes(16);
@@ -1607,6 +1625,79 @@ document.getElementById('encryptToggle').addEventListener('change', function() {
     setEncryptMode(this.checked);
 });
 
+// --- overwriting an encrypted named paste keeps its links working ---
+// links to /x/<name> carry the passphrase in the fragment, so re-encrypting under
+// a fresh passphrase would break every link shared before. on overwrite, check
+// the passphrase against the existing paste first: if it opens it, reuse that
+// paste's salt so the (slow) derived key doubles as the new key - same key,
+// fresh nonce, so old links decrypt the new content. a mismatch warns once;
+// clicking publish again with the same name and passphrase goes ahead.
+var overwriteBreakArmed = null;
+
+// overwrite ticked in named mode: the passphrase field waits for the old one
+function keepingOldPassphrase() {
+    return namedKey !== null && document.getElementById('namedOverwrite').checked;
+}
+
+// resolves { key, salt } to reuse, null when there's nothing to keep (no
+// existing paste, or it isn't encrypted), or false on a warned mismatch
+async function keyForOverwrite(name, password) {
+    var resp = await fetch('/x/' + encodeURIComponent(name) + '?raw', { cache: 'no-store', credentials: 'omit' });
+    if (!resp.ok) return null;
+    var old = new Uint8Array(await resp.arrayBuffer());
+    var nonceLen = nacl.secretbox.nonceLength;
+    var isGpe1 = old.length > 21 + nonceLen && old[0] === 0 && old[1] === 0x47 &&
+        old[2] === 0x50 && old[3] === 0x45 && old[4] === 0x31;
+    if (!isGpe1) return null;
+    setStatus('<span class="spinner">|</span> checking passphrase against the existing /x/' + name + '...');
+    await new Promise(function(r) { setTimeout(r, 50); });
+    var salt = old.slice(5, 21);
+    var key = await deriveKey(password, salt);
+    if (nacl.secretbox.open(old.slice(21 + nonceLen), old.slice(21, 21 + nonceLen), key)) {
+        overwriteBreakArmed = null;
+        return { key: key, salt: salt };
+    }
+    var armed = name + NL + password;
+    if (overwriteBreakArmed === armed) {
+        overwriteBreakArmed = null;
+        return null; // confirmed: publish under the new passphrase
+    }
+    overwriteBreakArmed = armed;
+    setStatus('warning: this passphrase does not open the existing /x/' + name +
+        ' - links shared before would stop working. paste its old link or passphrase, ' +
+        'or click publish again to replace it anyway', 'err');
+    return false;
+}
+
+// pasting an old share link into the passphrase field keeps just its passphrase
+document.getElementById('passphrase').addEventListener('input', function() {
+    var v = this.value;
+    var at = v.indexOf('#;;;');
+    if (at === -1) return;
+    var parts = v.slice(at + 1).split(';;;');
+    if (parts[1]) {
+        try { this.value = decodeURIComponent(parts[1]); } catch (e) { this.value = parts[1]; }
+    }
+});
+
+// ticking overwrite on an encrypted paste swaps the generated passphrase for a
+// prompt to enter the old one; unticking restores a fresh generated one
+document.getElementById('namedOverwrite').addEventListener('change', function() {
+    var pw = document.getElementById('passphrase');
+    var label = document.getElementById('passphraseLabel');
+    if (this.checked) {
+        pw.value = '';
+        pw.placeholder = 'existing passphrase, or paste an old /x/ link';
+        pw.removeAttribute('readonly');
+        label.textContent = 'passphrase (reuse the old one so existing links keep working):';
+    } else {
+        pw.value = generatePassphrase();
+        pw.placeholder = '';
+        label.textContent = 'passphrase (auto-generated, click to edit):';
+    }
+    overwriteBreakArmed = null;
+});
+
 // --- hidden operator mode: named pastes at /x/<name> ---
 // the NAMED_KEY is held in memory (namedKey) and mirrored to sessionStorage so
 // it survives a reload within the tab but never touches disk and is gone on
@@ -1629,7 +1720,28 @@ function applyNamedState() {
     // named pastes are single-blob and operator-only; the index option (a batch
     // feature) has no meaning here, so keep it hidden while unlocked
     if (unlocked) document.getElementById('indexRow').style.display = 'none';
+    setNeverTtl(unlocked);
     updateUploadLabel();
+}
+
+// named pastes can be permanent: offer (and default to) 'never' while unlocked,
+// restoring the previous choice on lock. X-TTL 0 is the server's permanent value
+var ttlBeforeUnlock = null;
+function setNeverTtl(on) {
+    var sel = document.getElementById('ttlSelect');
+    var never = document.getElementById('ttlNever');
+    if (on && !never) {
+        ttlBeforeUnlock = sel.value;
+        never = document.createElement('option');
+        never.id = 'ttlNever';
+        never.value = '0';
+        never.textContent = 'never';
+        sel.appendChild(never);
+        sel.value = '0';
+    } else if (!on && never) {
+        sel.removeChild(never);
+        if (ttlBeforeUnlock !== null) sel.value = ttlBeforeUnlock;
+    }
 }
 
 function unlockNamed() {
@@ -1646,6 +1758,11 @@ function lockNamed() {
     namedKey = null;
     try { sessionStorage.removeItem('getpost_named_key'); } catch (e) {}
     setRootStatus('locked - back to normal uploads', '');
+    var ow = document.getElementById('namedOverwrite');
+    if (ow.checked) {
+        ow.checked = false;
+        ow.dispatchEvent(new Event('change'));
+    }
     applyNamedState();
 }
 
@@ -1745,12 +1862,11 @@ applyNamedState();
             }
 
             // if requested as raw, return the original resp object with detected or custom MIME type
-            return cacheAndReturn(fetch_event, edgeCache, buildResponse(
+            return cacheAndReturn(fetch_event, edgeCache, buildRawResponse(
               contentFromKeyAsArrayBuffer,
               responseContentType,
-              CACHE_CONTENT,
-              200,
               url,
+              requestHeadersAndFriends["range"],
             ));
           }
           // otherwise, return the wrapped body with the text/html mimetype
@@ -1977,12 +2093,11 @@ expires at: ${responseData.expires_at}`;
             // raw needs only the sniffed type - skip building the whole page
             responseContentType = detectContent(contentFromKeyAsArrayBuffer).type;
           }
-          return cacheAndReturn(fetch_event, edgeCache, buildResponse(
+          return cacheAndReturn(fetch_event, edgeCache, buildRawResponse(
             contentFromKeyAsArrayBuffer,
             responseContentType,
-            CACHE_CONTENT,
-            200,
             url,
+            requestHeadersAndFriends["range"],
           ));
         } else {
           const [generatedBodyHtml] = generateHtmlBasedOnType(
@@ -2536,7 +2651,9 @@ X-TTL: 3600          # seconds until expiry
 
 # URL parameters
 ?raw                 # return original file
-?loop=true           # video: play inline on a loop (ignored for non-video)
+?loop                # audio/video: play inline on repeat (video: muted autoplay)
+?autoplay ?muted     # audio/video: start playing / start muted
+?t=1m30s             # audio/video: start position (90, 1:30 and 1h2m3s work too)
 ?cors=1              # enable CORS headers
 
 # delete a post (deletion requires POST; GET shows a confirmation page)
@@ -2549,6 +2666,7 @@ curl -X POST -H "Authorization: SECRET" --data-binary @page.md https://${url.hos
 
 # read (public)
 curl https://${url.host}/x/welcome?raw</code></pre>
+<p>For encrypted media, put the same options in the fragment, after the filename (<code>#;;;pass;;;type;;;name;;;loop&amp;t=30</code>) &mdash; like the passphrase, they never reach the server.</p>
 <p>Named pastes are permanent by default. Encrypted pages that link to other <code>/x/</code> pages carry the passphrase fragment forward &mdash; one link can unlock a whole set of E2E-encrypted pages.</p>
 
 <h2>deploy your own</h2>
@@ -2640,7 +2758,10 @@ ciphertext    (remainder)
 - Cipher: NaCl \`secretbox\` (XSalsa20-Poly1305).
 - The passphrase travels only in the URL **fragment** (\`#...\`), which browsers never send
   to the server. Fragment layout used by the viewer:
-  \`#;;;<passphrase>;;;<mime-type>;;;<filename>\`.
+  \`#;;;<passphrase>;;;<mime-type>;;;<filename>[;;;<player options>]\`.
+  An optional field after the filename takes the same player options as the query
+  string, in query syntax (\`loop&t=30\`), and applies them to decrypted audio/video — so
+  they stay client-side along with the passphrase.
 
 CLI uploads via \`POST /post\` are stored **as sent** — i.e. unencrypted unless you encrypt
 first. Use the bundled \`pastebin-crypted.py\` client (served at \`/pastebin-crypted.py\`) to
@@ -2750,19 +2871,33 @@ echo "hello" | curl -H "X-TTL: 3600" --data-binary @- "$BASE/post"
 
 - Without \`key\`: returns the **upload HTML page** (\`200\`).
 - With \`key\`, no \`raw\`: returns the **HTML viewer** wrapping the content (markdown render
-  for text, decrypt UI for GPE1, redirect countdown for \`text/x-url\`, looping \`<video>\` for
-  video with \`?loop\`, and a JS auto-redirect to \`&raw\` for images, audio, video and other
+  for text, decrypt UI for GPE1, redirect countdown for \`text/x-url\`, an inline
+  \`<video>\`/\`<audio>\` player for media with player options (below), and a JS
+  auto-redirect to \`&raw\` for images, audio, video and other
   binary — crawlers don't run it, so \`og:image\`/meta previews still work).
 - With \`key\` and \`raw\`: returns the **original bytes** with the sniffed MIME type.
+  Single byte ranges (\`Range: bytes=a-b\`, \`a-\`, \`-n\`) get \`206\` (\`416\` when out of
+  bounds), so media can be scrubbed and seeked. Raw responses carry
+  \`Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms\` (PDFs
+  excepted, since browsers won't render them sandboxed): uploaded HTML/SVG opened raw runs
+  in an opaque origin and can't read this origin's storage.
 
 \`HEAD\` is served via the same path (body stripped by the runtime) — useful for link-preview
 crawlers.
 
 **Query params**
 - \`raw\` (presence) — return original bytes instead of the HTML viewer.
-- \`loop\` (presence, e.g. \`loop=true\`) — for video content, play it inline on a looping,
-  muted \`<video>\` with controls instead of redirecting to \`&raw\`. Ignored on non-video
-  content. \`loop=0\`/\`false\`/\`no\` turns it off.
+- Player options, for audio and video — any of them plays the media inline (with
+  controls) instead of redirecting to \`&raw\`; ignored for other content. Flags are
+  presence-only (\`loop\`, \`loop=1\`); \`0\`/\`false\`/\`no\`/\`off\` turns one off, and all-off is
+  the same as none.
+  - \`loop\` — repeat. On video, \`loop\` alone is gif-style: it also autoplays muted
+    (browsers only allow muted autoplay) unless \`autoplay\`/\`muted\` are given explicitly.
+  - \`autoplay\` — start playing. A video the browser refuses to autoplay with sound
+    retries muted.
+  - \`muted\` — start muted.
+  - \`t=<time>\` — start position: \`90\`, \`12.5\`, \`1:30\`, \`1:02:03\` or \`1h2m3s\`.
+  - For encrypted media the same options go in the fragment, after the filename (see above).
 - \`content_type=<mime>\` — override the response \`Content-Type\` for \`raw\` reads. Validated;
   invalid value → \`400\`.
 - \`title=<text>\` — custom \`<title>\`/\`og:title\` for the viewer page (HTML-sanitized, max
@@ -2780,7 +2915,9 @@ crawlers.
 \`\`\`sh
 curl -s "$BASE/post?key=01ARZ...&raw"                  # original bytes
 curl -s "$BASE/post?key=01ARZ...&raw&content_type=text/html"
-open "$BASE/post?key=01ARZ...&loop=true"               # video, looping inline
+open "$BASE/post?key=01ARZ...&loop"                    # video, gif-style loop
+open "$BASE/post?key=01ARZ...&t=1m30s&autoplay"        # start 90s in
+open "$BASE/post?key=01ARZ...#;;;pass;;;video%2Fmp4;;;v.mp4;;;loop%26t%3D5"  # encrypted
 curl -sI "$BASE/post?key=01ARZ..."                     # HEAD
 \`\`\`
 
@@ -2818,7 +2955,8 @@ binding (otherwise writes return \`403\`).
   ≥60 s like \`/post\`).
 
 #### \`GET /x/<name>\` (and \`HEAD\`)
-Public read. Same \`raw\`, \`loop\`, \`content_type\`, \`title\`, \`lang\`, \`cors\` params as \`GET /post\`.
+Public read. Same \`raw\`, player options, \`content_type\`, \`title\`, \`lang\`, \`cors\` params
+as \`GET /post\`.
 - \`200\` — HTML viewer, or raw bytes with \`?raw\`.
 - \`404\` — name not found or invalid.
 
@@ -3007,6 +3145,9 @@ followed by the API reference at \`/llms.txt\` (\`/agents.md\` redirects there).
 - Operator secrets (\`PERMANENT_KEY\`, \`NAMED_KEY\`) are worker bindings set at deploy time
   and are compared, never echoed. Named-paste writes require \`Authorization\` and
   overwrites require \`X-I-Really-Mean-It: yes\`.
+- Raw bytes are attacker-controlled and share this origin with the upload page, which
+  keeps the operator key in \`sessionStorage\`. \`buildRawResponse\` sandboxes them with CSP
+  (opaque origin); every raw path must go through it.
 - MIME types are sniffed from stored bytes on every read, so a sniffer fix takes effect
   for existing content on the next deploy without re-uploading.
 
@@ -3101,9 +3242,10 @@ function isValidContentType(contentType) {
   return true;
 }
 
-// store a content response in the PoP-local cache and return it (the Cache API only accepts GET)
+// store a content response in the PoP-local cache and return it (the Cache API
+// only accepts GET, and refuses partial 206s - a cached full body serves ranges itself)
 function cacheAndReturn(fetch_event, edgeCache, response) {
-  if (fetch_event.request.method === "GET") {
+  if (fetch_event.request.method === "GET" && response.status === 200) {
     fetch_event.waitUntil(edgeCache.put(fetch_event.request, response.clone()));
   }
   return response;
@@ -3425,6 +3567,62 @@ function detectContent(content) {
   return { type: DEFAULT_MIME_TEXT, text: contentAsString };
 }
 
+// media player options: loop, autoplay, muted and t (start time). the flags are
+// presence-only like ?raw, except an explicit 0/false/no/off turns one off.
+// returns null when none is on, so plain media links keep the raw redirect.
+// for video, loop alone means gif-style: autoplay (which browsers only allow
+// muted) unless autoplay/muted are set explicitly. the viewer page applies the
+// same rules to encrypted media, reading them from the link fragment.
+function parsePlayerOpts(params, type) {
+  const flag = (k) => params.has(k) && !/^(0|false|no|off)$/i.test(params.get(k));
+  if (!["loop", "autoplay", "muted", "t"].some((k) => params.has(k))) return null;
+  const isVideo = type.startsWith("video/");
+  const loop = flag("loop");
+  const gifStyle = isVideo && loop;
+  const opts = {
+    loop,
+    autoplay: params.has("autoplay") ? flag("autoplay") : gifStyle,
+    muted: params.has("muted") ? flag("muted") : gifStyle,
+    t: parseMediaTime(params.get("t")),
+  };
+  // all off (?loop=0) is the same as none given
+  return (opts.loop || opts.autoplay || opts.muted || opts.t) ? opts : null;
+}
+
+// start time as seconds: "90", "12.5", "1:30", "1:02:03" or "1h2m3s" (null if unparseable)
+function parseMediaTime(s) {
+  if (!s) return null;
+  let m;
+  if ((m = /^(\d+(?:\.\d+)?)s?$/.exec(s))) return parseFloat(m[1]);
+  if ((m = /^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/.exec(s))) {
+    return (parseInt(m[1] || "0", 10) * 3600) + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+  }
+  if ((m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(s)) && (m[1] || m[2] || m[3])) {
+    return parseInt(m[1] || "0", 10) * 3600 + parseInt(m[2] || "0", 10) * 60 + parseFloat(m[3] || "0");
+  }
+  return null;
+}
+
+// inline <video>/<audio> for a player-options page. the start time goes in
+// data-start, which the viewer script seeks to once metadata loads (browsers
+// don't reliably honor a #t= media fragment); the fragment stays on the src as
+// a hint for clients without script.
+function mediaPlayerHtml(type, rawUrl, opts) {
+  const isVideo = type.startsWith("video/");
+  const src = sanitizeHtml(rawUrl + (opts.t ? "#t=" + opts.t : ""));
+  const attrs = ["controls"];
+  if (opts.t) attrs.push(`data-start="${opts.t}"`);
+  if (isVideo) attrs.push("playsinline");
+  if (opts.autoplay) attrs.push("autoplay");
+  if (opts.loop) attrs.push("loop");
+  if (opts.muted) attrs.push("muted");
+  const style = isVideo ?
+    "display:block;max-width:100%;max-height:90vh;margin:0 auto" :
+    "display:block;width:100%";
+  const tag = isVideo ? "video" : "audio";
+  return `<${tag} class="gp-player" ${attrs.join(" ")} src="${src}" style="${style}"></${tag}>`;
+}
+
 // content (and optional url) to wrapper html and detected type
 function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle = null) {
   let expiryTime = "Unknown";
@@ -3440,12 +3638,11 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   }
   const { type, text: decodedText } = detectContent(content);
   let injectorScript;
-  // ?loop (or loop=true): play video inline on a looping <video> instead of
-  // redirecting to the raw bytes. presence-only like ?raw, except an explicit
-  // loop=0/false/no is off. ignored for everything that isn't video.
-  const loopParam = url && url.searchParams ? url.searchParams.get("loop") : null;
-  const loopVideo = loopParam !== null && !/^(0|false|no|off)$/i.test(loopParam);
-  let loopVideoHtml = "";
+  // player options (?loop, ?autoplay, ?muted, ?t=): any of them plays audio or
+  // video inline on this page instead of redirecting to the raw bytes. ignored
+  // for everything else; encrypted media gets the same options client-side.
+  const playerOpts = url && url.searchParams ? parsePlayerOpts(url.searchParams, type) : null;
+  let playerHtml = "";
 
   switch (type) {
     case "application/x-encrypted":
@@ -3455,16 +3652,18 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "video/mp4":
     case "video/quicktime":
     case "video/webm":
-      if (loopVideo) {
-        // gif-style loop: autoplay only works muted, so mute and keep the
-        // controls so the viewer can unmute. src is this page's own raw url.
-        const rawSrc = sanitizeHtml(url.toString() + (url.search ? "&raw" : "?raw"));
-        loopVideoHtml = `<video autoplay loop muted playsinline controls src="${rawSrc}" ` +
-          `style="display:block;max-width:100%;max-height:90vh;margin:0 auto"></video>`;
+    case "audio/mp3":
+    case "audio/ogg":
+    case "audio/flac":
+    case "audio/wav":
+    case "audio/mp4":
+      if (playerOpts) {
+        // src is this page's own raw url
+        playerHtml = mediaPlayerHtml(type, url.toString() + (url.search ? "&raw" : "?raw"), playerOpts);
         injectorScript = "";
         break;
       }
-      // no loop flag: fall through to the raw redirect with the rest
+      // no player options: fall through to the raw redirect with the rest
     // everything below redirects to raw: browsers render all of these natively.
     // crawlers don't run the JS redirect, so og/meta previews still work.
     case "image/png":
@@ -3472,11 +3671,6 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
     case "image/jpeg":
     case "image/webp":
     case "image/svg+xml":
-    case "audio/mp3":
-    case "audio/ogg":
-    case "audio/flac":
-    case "audio/wav":
-    case "audio/mp4":
     case "image/heic":
     case "application/pdf":
     case "application/zip":
@@ -3532,9 +3726,9 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   } else if (type === "text/x-url") {
     // don't render the URL as page content - the viewer JS owns the display
     description = "GetPost: redirect";
-  } else if (loopVideoHtml) {
-    contentAsHtmlFromMarked = loopVideoHtml;
-    description = "GetPost: looping " + type;
+  } else if (playerHtml) {
+    contentAsHtmlFromMarked = playerHtml;
+    description = "GetPost: " + type + (playerOpts.loop ? " (looping)" : "");
   } else {
     description = "GetPost: " + type;
   }
@@ -4121,6 +4315,9 @@ body {
                         if (parts.length >= 4 && parts[3]) {
                             originalFilename = decodeURIComponent(parts[3]);
                         }
+                        if (parts.length >= 5 && parts[4]) {
+                            fragmentPlayerParams = new URLSearchParams(decodeURIComponent(parts[4]));
+                        }
                         showStatus('passphrase loaded, decrypting...', 'info');
                         setTimeout(function() { decryptContent(); }, 500);
                         // keep the fragment: stripping it made the address-bar URL unshareable
@@ -4354,10 +4551,9 @@ body {
             if (canDisplayInline) {
                 if (mimeType.startsWith('image/')) {
                     decryptedDiv.innerHTML = '<img src="' + blobUrl + '" style="max-width: 100%; height: auto;">';
-                } else if (mimeType.startsWith('video/')) {
-                    decryptedDiv.innerHTML = '<video controls style="max-width: 100%;"><source src="' + blobUrl + '" type="' + mimeType + '"></video>';
-                } else if (mimeType.startsWith('audio/')) {
-                    decryptedDiv.innerHTML = '<audio controls style="width: 100%;"><source src="' + blobUrl + '" type="' + mimeType + '"></audio>';
+                } else if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+                    decryptedDiv.innerHTML = '';
+                    decryptedDiv.appendChild(buildMediaPlayer(mimeType, blobUrl));
                 } else if (mimeType === 'application/pdf') {
                     decryptedDiv.innerHTML = '<iframe src="' + blobUrl + '" style="width: 100%; height: 600px; border: none;"></iframe>';
                 }
@@ -4365,6 +4561,88 @@ body {
                 decryptedDiv.innerHTML = '<p>Binary content decrypted.</p>';
             }
         }
+    }
+
+    // --- media player options: loop, autoplay, muted, t (start time) ---
+    // same rules as the server's parsePlayerOpts. encrypted links carry them in
+    // a fragment field after the filename (#;;;pass;;;type;;;name;;;loop&t=30),
+    // which never reaches the server; query parameters work too, but are sent.
+    var fragmentPlayerParams = null;
+
+    function playerOptsFor(mimeType) {
+        var params = new URLSearchParams(window.location.search);
+        if (fragmentPlayerParams) {
+            fragmentPlayerParams.forEach(function(v, k) { params.set(k, v); });
+        }
+        var keys = ['loop', 'autoplay', 'muted', 't'];
+        if (!keys.some(function(k) { return params.has(k); })) return null;
+        function flag(k) {
+            return params.has(k) && !/^(0|false|no|off)$/i.test(params.get(k));
+        }
+        var gifStyle = mimeType.startsWith('video/') && flag('loop');
+        var opts = {
+            loop: flag('loop'),
+            autoplay: params.has('autoplay') ? flag('autoplay') : gifStyle,
+            muted: params.has('muted') ? flag('muted') : gifStyle,
+            t: parseMediaTime(params.get('t'))
+        };
+        return (opts.loop || opts.autoplay || opts.muted || opts.t) ? opts : null;
+    }
+
+    // "90", "12.5", "1:30", "1:02:03" or "1h2m3s" to seconds (null if unparseable)
+    function parseMediaTime(s) {
+        if (!s) return null;
+        var m = /^([0-9]+([.][0-9]+)?)s?$/.exec(s);
+        if (m) return parseFloat(m[1]);
+        m = /^(?:([0-9]+):)?([0-9]+):([0-9]+(?:[.][0-9]+)?)$/.exec(s);
+        if (m) return parseInt(m[1] || '0', 10) * 3600 + parseInt(m[2], 10) * 60 + parseFloat(m[3]);
+        m = /^(?:([0-9]+)h)?(?:([0-9]+)m)?(?:([0-9]+(?:[.][0-9]+)?)s)?$/.exec(s);
+        if (m && (m[1] || m[2] || m[3])) {
+            return parseInt(m[1] || '0', 10) * 3600 + parseInt(m[2] || '0', 10) * 60 + parseFloat(m[3] || '0');
+        }
+        return null;
+    }
+
+    // start playback; browsers refuse unmuted autoplay without a user gesture,
+    // so a refused video retries muted (controls stay up to unmute). audio just
+    // waits for the play button - muted audio is pointless.
+    function startPlayback(el) {
+        var p = el.play();
+        if (!p || !p.catch) return;
+        p.catch(function() {
+            if (el.tagName !== 'VIDEO' || el.muted) return;
+            el.muted = true;
+            el.play().catch(function() {});
+        });
+    }
+
+    // jump to the start time once the duration is known (again after a src change)
+    function seekOnLoad(el, t) {
+        el.addEventListener('loadedmetadata', function() { el.currentTime = t; });
+        if (el.readyState >= 1) el.currentTime = t;
+    }
+
+    // <video>/<audio> for decrypted media, honoring the player options. muted is
+    // set as a property: the attribute alone doesn't mute a script-built element.
+    function buildMediaPlayer(mimeType, blobUrl) {
+        var isVideo = mimeType.startsWith('video/');
+        var el = document.createElement(isVideo ? 'video' : 'audio');
+        el.controls = true;
+        if (isVideo) {
+            el.playsInline = true;
+            el.style.cssText = 'display:block;max-width:100%;max-height:90vh;margin:0 auto';
+        } else {
+            el.style.cssText = 'display:block;width:100%';
+        }
+        var opts = playerOptsFor(mimeType);
+        if (opts) {
+            el.loop = opts.loop;
+            el.muted = opts.muted;
+            if (opts.t) seekOnLoad(el, opts.t);
+        }
+        el.src = blobUrl;
+        if (opts && opts.autoplay) startPlayback(el);
+        return el;
     }
 
     function toggleDecryptPasswordVisibility() {
@@ -4385,6 +4663,14 @@ body {
             if (e.key === 'Enter') decryptContent();
         });
     }
+
+    // server-rendered players (plaintext media with player options): seek to
+    // data-start, and the same muted retry for autoplay
+    document.querySelectorAll('.gp-player').forEach(function(el) {
+        var t = parseFloat(el.getAttribute('data-start'));
+        if (t > 0) seekOnLoad(el, t);
+        if (el.autoplay) startPlayback(el);
+    });
 
     window.addEventListener('load', async function() {
         // the url shortlink path needs no crypto libs - run it before the guard
@@ -4417,6 +4703,35 @@ body {
 </html>
 `; // eslint-disable-line
   return [contentAsWrappedHtml, type];
+}
+
+// raw content response: cacheable, sandboxed unless it's a pdf (see RAW_SANDBOX),
+// and range-capable - browsers treat media they can't fetch by range as
+// unseekable (no scrubbing, no ?t= start time). a single "bytes=a-b", "a-" or
+// "-n" range gets a 206; anything else (multi-range, junk) gets the whole body.
+function buildRawResponse(blob, type, url, rangeHeader) {
+  const isPdf = type.toLowerCase().startsWith("application/pdf");
+  const headers = Object.assign({ "Accept-Ranges": "bytes" }, CACHE_CONTENT, isPdf ? {} : RAW_SANDBOX);
+  const m = rangeHeader && /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!m || (m[1] === "" && m[2] === "")) {
+    return buildResponse(blob, type, headers, 200, url);
+  }
+  const size = blob.byteLength;
+  let start, end;
+  if (m[1] === "") {
+    // suffix range: the last n bytes
+    start = Math.max(0, size - parseInt(m[2], 10));
+    end = size - 1;
+  } else {
+    start = parseInt(m[1], 10);
+    end = m[2] === "" ? size - 1 : Math.min(parseInt(m[2], 10), size - 1);
+  }
+  if (start >= size || start > end) {
+    headers["Content-Range"] = `bytes */${size}`;
+    return buildResponse("Sorry, requested range not satisfiable!", DEFAULT_MIME_TEXT, headers, 416, url);
+  }
+  headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+  return buildResponse(blob.slice(start, end + 1), type, headers, 206, url);
 }
 
 function buildResponse(

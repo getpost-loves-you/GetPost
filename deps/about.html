@@ -148,7 +148,9 @@ X-TTL: 3600          # seconds until expiry
 
 # URL parameters
 ?raw                 # return original file
-?loop=true           # video: play inline on a loop (ignored for non-video)
+?loop                # audio/video: play inline on repeat (video: muted autoplay)
+?autoplay ?muted     # audio/video: start playing / start muted
+?t=1m30s             # audio/video: start position (90, 1:30 and 1h2m3s work too)
 ?cors=1              # enable CORS headers
 
 # delete a post (deletion requires POST; GET shows a confirmation page)
@@ -161,6 +163,7 @@ curl -X POST -H "Authorization: SECRET" --data-binary @page.md https://${url.hos
 
 # read (public)
 curl https://${url.host}/x/welcome?raw</code></pre>
+<p>For encrypted media, put the same options in the fragment, after the filename (<code>#;;;pass;;;type;;;name;;;loop&amp;t=30</code>) &mdash; like the passphrase, they never reach the server.</p>
 <p>Named pastes are permanent by default. Encrypted pages that link to other <code>/x/</code> pages carry the passphrase fragment forward &mdash; one link can unlock a whole set of E2E-encrypted pages.</p>
 
 <h2>deploy your own</h2>

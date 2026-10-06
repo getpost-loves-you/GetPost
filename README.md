@@ -85,7 +85,7 @@ The deploy needs only `curl`, `python3`, `jq`, and a Linux-like shell (macOS, Li
 - **Smart rendering** — markdown as rich text, source as fenced code blocks (`?lang=` or filename hint), everything else verbatim
 - **Inline media** — PNG, JPEG, GIF, WebP, SVG, MP4, WebM, MP3, Ogg, FLAC, WAV, PDF
 - **Raw access** — append `&raw` to any link for the original bytes
-- **Looping video** — append `&loop=true` to a video link to play it inline on repeat, gif-style
+- **Player options** — `&loop` (gif-style for video), `&autoplay`, `&muted`, `&t=1m30s` play audio or video inline; encrypted links take them in the fragment so they stay private
 - **Configurable TTL** — default 1 year, set via `X-TTL` (seconds); operators can unlock no-expiry posts with a secret key
 - **Delete keys** — every upload gets a unique deletion URL (deletion requires POST, so link crawlers can't trigger it)
 - **CORS** — add `?cors=1` for cross-origin reads
@@ -196,7 +196,7 @@ Max 10MB. Response carries the share link, raw link, and delete link; send `Acce
 ```
 GET /post?key=ULID          # rendered HTML view
 GET /post?key=ULID&raw      # original bytes
-GET /post?key=ULID&loop=true  # video: play inline, looping (ignored for non-video)
+GET /post?key=ULID&loop      # audio/video inline; also &autoplay, &muted, &t=1m30s
 GET /post?key=ULID&lang=py  # render text as a code block in the given language
 GET /post?key=ULID&cors=1   # add CORS headers
 ```
