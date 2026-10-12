@@ -2,3 +2,6 @@ __pycache__/
 
 # Local working notes - not part of the published project
 CODE_REVIEW.md
+
+# private deploy configs (real secrets) - run as ./deploy.sh deploy.<name>
+.deploy.*

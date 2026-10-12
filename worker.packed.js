@@ -3105,8 +3105,9 @@ followed by the API reference at \`/llms.txt\` (\`/agents.md\` redirects there).
   the tests also refreshes the packed worker.
 - Deploy configs are dotfiles named \`.<deployment>\` and are sourced by \`deploy.sh\` and
   \`test.sh\`. \`.staging\` is committed on purpose (shared public staging credentials).
-  Any other config, such as \`.infra\`, holds real secrets, is not gitignored, and must
-  never be added to a commit. Prefer \`git add <files>\` over \`git add -A\`.
+  Private configs holding real secrets are named \`.deploy.<name>\` (run as
+  \`./deploy.sh deploy.<name>\`), which \`.gitignore\` excludes. Never commit one; prefer
+  \`git add <files>\` over \`git add -A\`.
 
 ## Testing instructions
 
