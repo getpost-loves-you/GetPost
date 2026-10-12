@@ -73,9 +73,11 @@ followed by the API reference at `/llms.txt` (`/agents.md` redirects there).
 - Operator secrets (`PERMANENT_KEY`, `NAMED_KEY`) are worker bindings set at deploy time
   and are compared, never echoed. Named-paste writes require `Authorization` and
   overwrites require `X-I-Really-Mean-It: yes`.
-- Raw bytes are attacker-controlled and share this origin with the upload page, which
-  keeps the operator key in `sessionStorage`. `buildRawResponse` sandboxes them with CSP
-  (opaque origin); every raw path must go through it.
+- Raw bytes and viewer pages (markdown passes inline HTML and scripts through) are
+  attacker-controlled and share this origin with the upload page, which keeps the
+  operator key in `sessionStorage`. `buildRawResponse` and `buildViewerResponse` sandbox
+  them with CSP (opaque origin); every raw or viewer path must go through them, and the
+  upload page must never be sandboxed.
 - MIME types are sniffed from stored bytes on every read, so a sniffer fix takes effect
   for existing content on the next deploy without re-uploading.
 

@@ -599,14 +599,17 @@ async function test(name, fn) {
     assert.strictEqual(resp.status, 400);
   });
 
-  await test("raw responses are CSP-sandboxed (opaque origin), except pdf", async () => {
+  await test("raw and viewer responses are CSP-sandboxed (opaque origin), except pdf", async () => {
     const sandboxed = (resp) => /^sandbox\b/.test(resp.headers.get("content-security-policy") || "") &&
       !resp.headers.get("content-security-policy").includes("allow-same-origin");
     const json = await uploadJson("<script>sessionStorage.getItem('getpost_named_key')</script>");
     assert.ok(sandboxed(await call("GET", "/post?key=" + json.key + "&raw")), "sniffed raw");
     assert.ok(sandboxed(await call("GET", "/post?key=" + json.key + "&raw&content_type=text/html")), "forced text/html");
-    // the viewer page itself runs our scripts in the real origin - not sandboxed
-    assert.ok(!(await call("GET", "/post?key=" + json.key)).headers.get("content-security-policy"));
+    // the viewer page is sandboxed too (user markdown can carry inline scripts),
+    // but the upload page - which holds the operator key - must not be
+    assert.ok(sandboxed(await call("GET", "/post?key=" + json.key)), "viewer page");
+    assert.strictEqual((await call("GET", "/post")).headers.get("content-security-policy"), null, "upload page");
+    assert.strictEqual((await call("GET", "/")).headers.get("content-security-policy"), null, "root upload page");
     const pdf = await uploadJson("%PDF-1.4 x");
     const pdfResp = await call("GET", "/post?key=" + pdf.key + "&raw");
     assert.ok(pdfResp.headers.get("content-type").startsWith("application/pdf"));
@@ -616,6 +619,7 @@ async function test(name, fn) {
     try {
       await call("POST", "/x/sbx", { body: "<b>x</b>", headers: { Authorization: "named-secret" } });
       assert.ok(sandboxed(await call("GET", "/x/sbx?raw")), "named raw");
+      assert.ok(sandboxed(await call("GET", "/x/sbx")), "named viewer page");
     } finally {
       delete sandbox.NAMED_KEY;
     }

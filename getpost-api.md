@@ -178,6 +178,11 @@ echo "hello" | curl -H "X-TTL: 3600" --data-binary @- "$BASE/post"
   `Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms` (PDFs
   excepted, since browsers won't render them sandboxed): uploaded HTML/SVG opened raw runs
   in an opaque origin and can't read this origin's storage.
+- The HTML viewer page is sandboxed the same way (plus `allow-popups-to-escape-sandbox
+  allow-modals allow-downloads`). Inline HTML and `<script>` in markdown still run, just
+  without access to this origin; the viewer fetches its own raw bytes with `cors=1`.
+  Decrypted PDFs are offered as a download rather than shown inline, since browsers
+  won't render PDFs in a sandboxed page.
 
 `HEAD` is served via the same path (body stripped by the runtime) — useful for link-preview
 crawlers.

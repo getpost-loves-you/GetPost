@@ -290,6 +290,18 @@ const RAW_SANDBOX = {
   "Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms"
 };
 
+// viewer pages (/post?key=..., /x/<name>) carry uploaded markdown, and markdown
+// passes inline html through - <script>, onerror=, the lot. that's a feature, so
+// rather than strip it, the whole viewer page gets an opaque origin: user scripts
+// (and ours) still run, but can't read this origin's storage, such as the operator
+// key the upload page keeps in sessionStorage. the upload page itself is never
+// sandboxed. the viewer is now cross-origin to its own raw bytes, so it fetches
+// them with ?cors=1.
+const VIEWER_SANDBOX = {
+  "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups " +
+    "allow-popups-to-escape-sandbox allow-modals allow-downloads"
+};
+
 addEventListener("fetch", (fetch_event) => {
   // configure primary entrypoint
   fetch_event.respondWith(HANDLER(fetch_event));
@@ -1877,13 +1889,7 @@ applyNamedState();
               metadata,
               customTitle
             );
-            return cacheAndReturn(fetch_event, edgeCache, buildResponse(
-              generatedBodyHtml,
-              DEFAULT_MIME_HTML,
-              CACHE_CONTENT,
-              200,
-              url,
-            ));
+            return cacheAndReturn(fetch_event, edgeCache, buildViewerResponse(generatedBodyHtml, url));
           }
         } else {
           return buildResponse(
@@ -2106,13 +2112,7 @@ expires at: ${responseData.expires_at}`;
             metadata,
             customTitle
           );
-          return cacheAndReturn(fetch_event, edgeCache, buildResponse(
-            generatedBodyHtml,
-            DEFAULT_MIME_HTML,
-            CACHE_CONTENT,
-            200,
-            url,
-          ));
+          return cacheAndReturn(fetch_event, edgeCache, buildViewerResponse(generatedBodyHtml, url));
         }
       } else {
         return buildResponse(
@@ -2881,6 +2881,11 @@ echo "hello" | curl -H "X-TTL: 3600" --data-binary @- "$BASE/post"
   \`Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms\` (PDFs
   excepted, since browsers won't render them sandboxed): uploaded HTML/SVG opened raw runs
   in an opaque origin and can't read this origin's storage.
+- The HTML viewer page is sandboxed the same way (plus \`allow-popups-to-escape-sandbox
+  allow-modals allow-downloads\`). Inline HTML and \`<script>\` in markdown still run, just
+  without access to this origin; the viewer fetches its own raw bytes with \`cors=1\`.
+  Decrypted PDFs are offered as a download rather than shown inline, since browsers
+  won't render PDFs in a sandboxed page.
 
 \`HEAD\` is served via the same path (body stripped by the runtime) — useful for link-preview
 crawlers.
@@ -3146,9 +3151,11 @@ followed by the API reference at \`/llms.txt\` (\`/agents.md\` redirects there).
 - Operator secrets (\`PERMANENT_KEY\`, \`NAMED_KEY\`) are worker bindings set at deploy time
   and are compared, never echoed. Named-paste writes require \`Authorization\` and
   overwrites require \`X-I-Really-Mean-It: yes\`.
-- Raw bytes are attacker-controlled and share this origin with the upload page, which
-  keeps the operator key in \`sessionStorage\`. \`buildRawResponse\` sandboxes them with CSP
-  (opaque origin); every raw path must go through it.
+- Raw bytes and viewer pages (markdown passes inline HTML and scripts through) are
+  attacker-controlled and share this origin with the upload page, which keeps the
+  operator key in \`sessionStorage\`. \`buildRawResponse\` and \`buildViewerResponse\` sandbox
+  them with CSP (opaque origin); every raw or viewer path must go through them, and the
+  upload page must never be sandboxed.
 - MIME types are sniffed from stored bytes on every read, so a sniffer fix takes effect
   for existing content on the next deploy without re-uploading.
 
@@ -4193,6 +4200,12 @@ body {
         return base + '?raw';
     }
 
+    // the viewer page is CSP-sandboxed to an opaque origin, which makes its own
+    // raw bytes a cross-origin fetch - ask for CORS headers
+    function rawFetchUrlOfPage() {
+        return rawUrlOfPage() + '&cors=1';
+    }
+
     // --- url shortlink countdown ---
     // a paste whose entire content is one http/https URL acts as a shortlink:
     // the viewer shows the destination plus a cancellable 5 second countdown.
@@ -4260,7 +4273,7 @@ body {
     async function checkIfUrlRedirect() {
         if (payloadType !== 'text/x-url') return false;
         try {
-            var rawUrl = rawUrlOfPage();
+            var rawUrl = rawFetchUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -4285,7 +4298,7 @@ body {
         // the server already typed the payload - only refetch the raw bytes when it's encrypted
         if (payloadType !== 'application/x-encrypted') return false;
         try {
-            var rawUrl = rawUrlOfPage();
+            var rawUrl = rawFetchUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -4556,7 +4569,19 @@ body {
                     decryptedDiv.innerHTML = '';
                     decryptedDiv.appendChild(buildMediaPlayer(mimeType, blobUrl));
                 } else if (mimeType === 'application/pdf') {
-                    decryptedDiv.innerHTML = '<iframe src="' + blobUrl + '" style="width: 100%; height: 600px; border: none;"></iframe>';
+                    // this page is CSP-sandboxed, and browsers refuse to render a
+                    // pdf inside a sandboxed document (or open a blob made by one
+                    // in a new tab) - so the decrypted pdf is offered as a download
+                    var note = document.createElement('p');
+                    note.textContent = 'pdf decrypted - browsers will not display pdfs on this sandboxed page, so download it to view.';
+                    var dl = document.createElement('a');
+                    dl.className = 'download-btn';
+                    dl.href = blobUrl;
+                    dl.download = originalFilename || 'decrypted.pdf';
+                    dl.textContent = 'download ' + dl.download;
+                    decryptedDiv.innerHTML = '';
+                    decryptedDiv.appendChild(note);
+                    decryptedDiv.appendChild(dl);
                 }
             } else {
                 decryptedDiv.innerHTML = '<p>Binary content decrypted.</p>';
@@ -4704,6 +4729,11 @@ body {
 </html>
 `; // eslint-disable-line
   return [contentAsWrappedHtml, type];
+}
+
+// html viewer page response: cacheable and sandboxed (see VIEWER_SANDBOX)
+function buildViewerResponse(html, url) {
+  return buildResponse(html, DEFAULT_MIME_HTML, Object.assign({}, CACHE_CONTENT, VIEWER_SANDBOX), 200, url);
 }
 
 // raw content response: cacheable, sandboxed unless it's a pdf (see RAW_SANDBOX),

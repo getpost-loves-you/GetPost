@@ -450,6 +450,12 @@ body {
         return base + '?raw';
     }
 
+    // the viewer page is CSP-sandboxed to an opaque origin, which makes its own
+    // raw bytes a cross-origin fetch - ask for CORS headers
+    function rawFetchUrlOfPage() {
+        return rawUrlOfPage() + '&cors=1';
+    }
+
     // --- url shortlink countdown ---
     // a paste whose entire content is one http/https URL acts as a shortlink:
     // the viewer shows the destination plus a cancellable 5 second countdown.
@@ -517,7 +523,7 @@ body {
     async function checkIfUrlRedirect() {
         if (payloadType !== 'text/x-url') return false;
         try {
-            var rawUrl = rawUrlOfPage();
+            var rawUrl = rawFetchUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -542,7 +548,7 @@ body {
         // the server already typed the payload - only refetch the raw bytes when it's encrypted
         if (payloadType !== 'application/x-encrypted') return false;
         try {
-            var rawUrl = rawUrlOfPage();
+            var rawUrl = rawFetchUrlOfPage();
             var response = await fetch(rawUrl, {
                 mode: 'cors',
                 credentials: 'omit',
@@ -813,7 +819,19 @@ body {
                     decryptedDiv.innerHTML = '';
                     decryptedDiv.appendChild(buildMediaPlayer(mimeType, blobUrl));
                 } else if (mimeType === 'application/pdf') {
-                    decryptedDiv.innerHTML = '<iframe src="' + blobUrl + '" style="width: 100%; height: 600px; border: none;"></iframe>';
+                    // this page is CSP-sandboxed, and browsers refuse to render a
+                    // pdf inside a sandboxed document (or open a blob made by one
+                    // in a new tab) - so the decrypted pdf is offered as a download
+                    var note = document.createElement('p');
+                    note.textContent = 'pdf decrypted - browsers will not display pdfs on this sandboxed page, so download it to view.';
+                    var dl = document.createElement('a');
+                    dl.className = 'download-btn';
+                    dl.href = blobUrl;
+                    dl.download = originalFilename || 'decrypted.pdf';
+                    dl.textContent = 'download ' + dl.download;
+                    decryptedDiv.innerHTML = '';
+                    decryptedDiv.appendChild(note);
+                    decryptedDiv.appendChild(dl);
                 }
             } else {
                 decryptedDiv.innerHTML = '<p>Binary content decrypted.</p>';

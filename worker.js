@@ -53,6 +53,18 @@ const RAW_SANDBOX = {
   "Content-Security-Policy": "sandbox allow-scripts allow-popups allow-forms"
 };
 
+// viewer pages (/post?key=..., /x/<name>) carry uploaded markdown, and markdown
+// passes inline html through - <script>, onerror=, the lot. that's a feature, so
+// rather than strip it, the whole viewer page gets an opaque origin: user scripts
+// (and ours) still run, but can't read this origin's storage, such as the operator
+// key the upload page keeps in sessionStorage. the upload page itself is never
+// sandboxed. the viewer is now cross-origin to its own raw bytes, so it fetches
+// them with ?cors=1.
+const VIEWER_SANDBOX = {
+  "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups " +
+    "allow-popups-to-escape-sandbox allow-modals allow-downloads"
+};
+
 addEventListener("fetch", (fetch_event) => {
   // configure primary entrypoint
   fetch_event.respondWith(HANDLER(fetch_event));
@@ -275,13 +287,7 @@ expires at: ${responseData.expires_at}`;
               metadata,
               customTitle
             );
-            return cacheAndReturn(fetch_event, edgeCache, buildResponse(
-              generatedBodyHtml,
-              DEFAULT_MIME_HTML,
-              CACHE_CONTENT,
-              200,
-              url,
-            ));
+            return cacheAndReturn(fetch_event, edgeCache, buildViewerResponse(generatedBodyHtml, url));
           }
         } else {
           return buildResponse(
@@ -504,13 +510,7 @@ expires at: ${responseData.expires_at}`;
             metadata,
             customTitle
           );
-          return cacheAndReturn(fetch_event, edgeCache, buildResponse(
-            generatedBodyHtml,
-            DEFAULT_MIME_HTML,
-            CACHE_CONTENT,
-            200,
-            url,
-          ));
+          return cacheAndReturn(fetch_event, edgeCache, buildViewerResponse(generatedBodyHtml, url));
         }
       } else {
         return buildResponse(
@@ -1149,6 +1149,11 @@ function generateHtmlBasedOnType(content, url = "", metadata = null, customTitle
   const previewImage = imageUrl || iconUrl;
   const contentAsWrappedHtml = `AUTOINSERT_GETPOST__HTML`; // eslint-disable-line
   return [contentAsWrappedHtml, type];
+}
+
+// html viewer page response: cacheable and sandboxed (see VIEWER_SANDBOX)
+function buildViewerResponse(html, url) {
+  return buildResponse(html, DEFAULT_MIME_HTML, Object.assign({}, CACHE_CONTENT, VIEWER_SANDBOX), 200, url);
 }
 
 // raw content response: cacheable, sandboxed unless it's a pdf (see RAW_SANDBOX),
